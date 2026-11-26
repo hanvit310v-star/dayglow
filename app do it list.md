@@ -34,10 +34,12 @@
 | Material 패키지 | 이 Flutter 버전은 `package:material_ui/material_ui.dart` 사용 (예전 `package:flutter/material.dart` 아님) |
 
 ### 배포 상태
-- **웹**: ✅ https://my-calendar-sandy-zeta.vercel.app (Vercel 프로젝트 `my-calendar`)
-  - 재배포: `cd app && ~/development/flutter/bin/flutter build web --release && npx --yes vercel@65.14.0 deploy --prod`
-  - ⚠️ 미확인: 같은 이름 프로젝트에 이전 배포(2026-11-26 오전)가 있었고, 이번 배포가 대표 주소를 대체함. 사용자가 만든 것이면 프로젝트 분리 필요
-- **GitHub**: ❌ 아직 저장소 없음 (아래 7번)
+- **웹**: ✅ https://my-calendar-sandy-zeta.vercel.app (Vercel 프로젝트 `my-calendar`, GitHub와 연결됨)
+  - **재배포 = GitHub `main`에 올리기만 하면 자동** (Vercel이 Flutter 3.50.1을 받아 `app/`을 빌드, 약 2분). 설정: 맨 위 폴더의 `vercel.json`, `.vercelignore`
+  - Flutter 버전을 올리면 `vercel.json`의 `-b 3.50.1`도 같이 바꾸기
+- **GitHub**: ✅ https://github.com/hanvit310v-star/my-calendar (공개 저장소, `main` 브랜치)
+  - 올리지 않는 파일: `.gitignore` 참고 (`.env*`, `.vercel`, `*.jks`, `key.properties`, `.claude/`, 빌드 결과물)
+  - ⚠️ 공개 저장소이므로 서명 키·비밀번호·토큰이 절대 커밋되지 않게 주의
 - **Google Play**: ❌ 아직
 
 ### 앱에 있는 기능 / 없는 기능
@@ -106,10 +108,11 @@
 - [ ] 오픈소스 라이선스 고지 (Pretendard OFL 등 — 앱 설정에 "오픈소스 라이선스" 메뉴 추가 권장, Flutter `showLicensePage` 사용)
 
 ## 7. GitHub (코드 보관·백업)
-- [ ] 저장소 공개 범위 결정 (**비공개 추천** — 개인 정보·키가 실수로 올라가는 위험 줄임)
-- [ ] `git init` → 첫 커밋 (`.gitignore`로 `build/`, `.vercel`, `.env.local`, `key.properties`, `*.jks` 제외 확인)
-- [ ] GitHub 로그인(사용자 직접) 후 원격 저장소 연결·푸시
-- [ ] (선택) Vercel 프로젝트를 GitHub와 연결 → 푸시할 때 자동 배포. 단 Vercel 서버에는 Flutter가 없어 빌드 설정 추가 필요 → 지금처럼 내 컴퓨터에서 빌드 후 `vercel deploy`가 더 간단
+- [x] 저장소 연결·최신화 (2026-11-26, https://github.com/hanvit310v-star/my-calendar)
+- [x] Vercel 자동 배포 연결 (main에 올리면 웹 링크 자동 갱신)
+- [ ] (선택) 저장소를 비공개로 바꿀지 결정 — 출시 앱 코드 공개 여부. 비공개로 바꿔도 Vercel 자동 배포는 그대로 동작
+- [ ] (선택) GitHub 저장소 오른쪽 "About" → Website에 웹 주소 입력 (사용자가 GitHub 화면에서 직접)
+- [ ] 서명 키 작업(4번) 전에 `git status`로 `key.properties`, `*.jks`가 목록에 없는지 확인
 
 ## 8. Google Play 출시 (사용자가 직접 하는 부분 위주)
 - [ ] Google Play Console 개발자 등록 (1회 $25, 본인 인증)
