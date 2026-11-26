@@ -1,0 +1,10 @@
+# Vercel에는 웹 빌드에 필요한 앱 소스만 보내요 (빌드 결과물·휴대폰 전용 폴더·문서 제외)
+/*
+!/app
+!/vercel.json
+/app/build
+/app/.dart_tool
+/app/ios
+/app/android
+/app/.vercel
+/app/.env*
