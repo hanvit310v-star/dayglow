@@ -15,6 +15,7 @@ import 'editors.dart';
 import 'motion.dart';
 import 'palette.dart';
 import 'strings.dart';
+import 'sync_dialog.dart';
 
 class HomePage extends StatefulWidget {
   final CalendarStore store;
@@ -260,6 +261,13 @@ class _LeftPane extends StatelessWidget {
     ]);
     final offCats = s.store.cats.where((c) => !c.on).length;
     final tools = Row(mainAxisSize: MainAxisSize.min, children: [
+      Pressable(
+        child: TextButton(
+          style: textButton(),
+          onPressed: () => showSyncDialog(context, store: s.store, pal: pal),
+          child: RollingText(syncLabel(s.store), style: const TextStyle(fontSize: 13)),
+        ),
+      ),
       Pressable(
         child: TextButton(
           style: textButton(),

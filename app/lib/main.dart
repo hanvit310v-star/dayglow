@@ -1,12 +1,13 @@
 // 앱 시작점
 // 폴더 구조 (확장 원칙: 공통 기능과 기기·화면을 분리)
 //   core/  날짜 계산·데이터 모양 (어느 기기에서나 같음)
-//   data/  저장소 (지금은 기기 안, 로그인 단계에서 서버 동기화 추가)
+//   data/  저장소 (기기 안 저장 + 로그인하면 Firebase 서버와 동기화)
 //   mood/  날씨·상황(분위기) 판단
 //   ui/    화면
 import 'package:material_ui/material_ui.dart';
 
 import 'data/calendar_store.dart';
+import 'data/sync_service.dart';
 import 'mood/mood_controller.dart';
 import 'ui/home_page.dart';
 
@@ -14,7 +15,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = CalendarStore();
   final mood = MoodController();
+  final sync = await SyncService.create(); // Firebase 준비 (아직 연결 전이면 기기 안 저장만 써요)
   await Future.wait([store.load(), mood.load()]);
+  store.attachSync(sync); // 일정을 먼저 불러온 뒤에 로그인 상태를 지켜봐요
   runApp(DayglowApp(store: store, mood: mood));
 }
 

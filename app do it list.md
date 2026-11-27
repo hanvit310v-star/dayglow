@@ -34,7 +34,7 @@
 | Material 패키지 | 이 Flutter 버전은 `package:material_ui/material_ui.dart` 사용 (예전 `package:flutter/material.dart` 아님) |
 
 ### 배포 상태
-- **웹**: ✅ https://dayglow.vercel.app (Vercel 프로젝트 `dayglow`, GitHub와 연결됨)
+- **웹**: ✅ https://dayglow-app.vercel.app (Vercel 프로젝트 `dayglow`, GitHub와 연결됨)
   - **재배포 = GitHub `main`에 올리기만 하면 자동** (Vercel이 Flutter 3.50.1을 받아 `app/`을 빌드, 약 2분). 설정: 맨 위 폴더의 `vercel.json`, `.vercelignore`
   - Flutter 버전을 올리면 `vercel.json`의 `-b 3.50.1`도 같이 바꾸기
 - **GitHub**: ✅ https://github.com/hanvit310v-star/dayglow (공개 저장소, `main` 브랜치)
