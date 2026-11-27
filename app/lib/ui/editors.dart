@@ -6,6 +6,7 @@ import '../core/models.dart';
 import '../data/calendar_store.dart';
 import '../mood/forecast.dart';
 import '../mood/mood_controller.dart';
+import 'calendar_views.dart' show TodoCircle;
 import 'motion.dart';
 import 'palette.dart';
 import 'strings.dart';
@@ -132,6 +133,8 @@ Future<String?> showEditor(
   int? hour,
   bool fromCell = false,
   Forecast? forecast,
+  Checklist? checklist,
+  bool startList = false, // true 면 'Checklist' 탭으로 시작
 }) =>
     // 입력 창: 살짝 작게 시작해서 커지며 떠오름
     showGeneralDialog<String>(
@@ -140,7 +143,7 @@ Future<String?> showEditor(
       barrierLabel: 'Close',
       barrierColor: const Color(0x8C080B0A),
       transitionDuration: Motion.of(context, const Duration(milliseconds: 160)), // 일정 창이 열리는 속도
-      pageBuilder: (_, _, _) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: forecast),
+      pageBuilder: (_, _, _) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: forecast, checklist: checklist, startList: startList),
       transitionBuilder: (_, anim, _, child) {
         final a = CurvedAnimation(parent: anim, curve: Motion.ease, reverseCurve: Curves.easeIn);
         return FadeTransition(
@@ -159,18 +162,21 @@ class _EditorDialog extends StatefulWidget {
   final int? hour;
   final bool fromCell;
   final Forecast? forecast;
-  const _EditorDialog({required this.store, required this.pal, this.event, this.todo, this.date, this.hour, required this.fromCell, this.forecast});
+  final Checklist? checklist;
+  final bool startList;
+  const _EditorDialog({required this.store, required this.pal, this.event, this.todo, this.date, this.hour, required this.fromCell, this.forecast, this.checklist, this.startList = false});
   @override
   State<_EditorDialog> createState() => _EditorDialogState();
 }
 
 class _EditorDialogState extends State<_EditorDialog> {
-  late String mode = widget.todo != null ? 'todo' : 'event';
-  bool get isNew => widget.event == null && widget.todo == null;
+  late String mode = widget.checklist != null || widget.startList ? 'list' : (widget.todo != null ? 'todo' : 'event');
+  bool get isNew => widget.event == null && widget.todo == null && widget.checklist == null;
 
   // 일정
   late final titleCtl = TextEditingController(text: widget.event?.title ?? '');
   late final memoCtl = TextEditingController(text: widget.event?.memo ?? '');
+  late final locationCtl = TextEditingController(text: widget.event?.location ?? '');
   late final newCatCtl = TextEditingController();
   late String date = widget.event?.date ?? widget.date ?? todayStr();
   late bool allDay = widget.event?.allDay ?? false;
@@ -185,30 +191,68 @@ class _EditorDialogState extends State<_EditorDialog> {
 
   // 할 일
   late final todoCtl = TextEditingController(text: widget.todo?.text ?? '');
-  late String due = widget.todo?.due ?? '';
+  late String due = widget.todo?.due ?? widget.checklist?.due ?? '';
   late bool done = widget.todo?.done ?? false;
   String err = '';
+
+  // 체크리스트 (항목마다 글자 칸·체크 상태·번호가 같은 순서로 쌓여 있어요)
+  late final listTitleCtl = TextEditingController(text: widget.checklist?.title ?? '');
+  late final newItemCtl = TextEditingController();
+  final newItemFocus = FocusNode();
+  final List<TextEditingController> itemCtls = [];
+  final List<bool> itemDone = [];
+  final List<String> itemIds = [];
+  final List<TextEditingController> _removedCtls = []; // 지운 칸은 창을 닫을 때 함께 정리
+
+  @override
+  void initState() {
+    super.initState();
+    for (final it in widget.checklist?.items ?? <CheckItem>[]) {
+      itemCtls.add(TextEditingController(text: it.text));
+      itemDone.add(it.done);
+      itemIds.add(it.id);
+    }
+    if (widget.checklist == null && widget.startList && widget.fromCell) due = widget.date ?? '';
+  }
+
+  void _addItem() {
+    final t = newItemCtl.text.trim();
+    if (t.isEmpty) return;
+    setState(() {
+      itemCtls.add(TextEditingController(text: t));
+      itemDone.add(false);
+      itemIds.add(newId());
+      newItemCtl.clear();
+    });
+    newItemFocus.requestFocus(); // 이어서 바로 다음 항목을 쓸 수 있게
+  }
+
+  void _removeItem(int i) => setState(() {
+        _removedCtls.add(itemCtls.removeAt(i));
+        itemDone.removeAt(i);
+        itemIds.removeAt(i);
+      });
 
   WxPalette get pal => widget.pal;
 
   @override
   void dispose() {
-    for (final c in [titleCtl, memoCtl, newCatCtl, todoCtl]) {
+    for (final c in [titleCtl, memoCtl, locationCtl, newCatCtl, todoCtl, listTitleCtl, newItemCtl, ...itemCtls, ..._removedCtls]) {
       c.dispose();
     }
+    newItemFocus.dispose();
     super.dispose();
   }
 
+  TextEditingController _titleCtlOf(String m) => m == 'todo' ? todoCtl : (m == 'list' ? listTitleCtl : titleCtl);
+
   void _switchTab(String m) {
     // 탭을 바꿔도 입력한 제목·날짜는 옮겨 줌
-    if (m == 'todo' && mode == 'event') {
-      if (todoCtl.text.isEmpty) todoCtl.text = titleCtl.text;
-      if (due.isEmpty && widget.fromCell) due = date;
-    }
-    if (m == 'event' && mode == 'todo') {
-      if (titleCtl.text.isEmpty) titleCtl.text = todoCtl.text;
-      if (due.isNotEmpty) date = due;
-    }
+    final carried = _titleCtlOf(mode).text;
+    final target = _titleCtlOf(m);
+    if (target.text.isEmpty) target.text = carried;
+    if (m != 'event' && mode == 'event' && due.isEmpty && widget.fromCell) due = date;
+    if (m == 'event' && mode != 'event' && due.isNotEmpty) date = due;
     setState(() {
       mode = m;
       err = '';
@@ -240,6 +284,19 @@ class _EditorDialogState extends State<_EditorDialog> {
   void _save() {
     setState(() => err = '');
     final s = widget.store;
+    if (mode == 'list') {
+      final title = listTitleCtl.text.trim();
+      if (title.isEmpty) return setState(() => err = '체크리스트 제목을 입력해 주세요.');
+      final pending = newItemCtl.text.trim(); // 쓰다 만 항목도 잃지 않게 함께 저장
+      final items = <CheckItem>[
+        for (var i = 0; i < itemCtls.length; i++)
+          if (itemCtls[i].text.trim().isNotEmpty) CheckItem(id: itemIds[i], text: itemCtls[i].text.trim(), done: itemDone[i]),
+        if (pending.isNotEmpty) CheckItem(id: newId(), text: pending),
+      ];
+      if (items.isEmpty) return setState(() => err = '항목을 하나 이상 추가해 주세요.');
+      s.upsertList(Checklist(id: widget.checklist?.id ?? newId(), title: title, due: due, items: items));
+      return Navigator.pop(context, widget.checklist != null ? 'Checklist updated' : 'Checklist added · ${items.length} items');
+    }
     if (mode == 'todo') {
       final text = todoCtl.text.trim();
       if (text.isEmpty) return setState(() => err = '할 일을 입력해 주세요.');
@@ -266,6 +323,7 @@ class _EditorDialogState extends State<_EditorDialog> {
       remind: remind,
       memo: memoCtl.text.trim(),
       outdoor: outdoor,
+      location: locationCtl.text.trim(),
     );
     final ov = s.overlaps(cand);
     if (ov.isNotEmpty && !forceSave) {
@@ -281,13 +339,14 @@ class _EditorDialogState extends State<_EditorDialog> {
 
   Future<void> _delete() async {
     final isTodo = mode == 'todo';
+    final isList = mode == 'list';
     final repeating = widget.event != null && widget.event!.repeat != 'none';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: sheetColor(pal),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        content: Text(isTodo ? '이 할 일을 삭제할까요?' : (repeating ? '반복 일정 전체가 삭제돼요. 삭제할까요?' : '이 일정을 삭제할까요?'),
+        content: Text(isList ? '이 체크리스트를 삭제할까요?' : isTodo ? '이 할 일을 삭제할까요?' : (repeating ? '반복 일정 전체가 삭제돼요. 삭제할까요?' : '이 일정을 삭제할까요?'),
             style: const TextStyle(color: t100, fontSize: 14)),
         actions: [
           TextButton(style: textButton(), onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
@@ -296,13 +355,68 @@ class _EditorDialogState extends State<_EditorDialog> {
       ),
     );
     if (ok != true || !mounted) return;
-    if (isTodo) {
+    if (isList) {
+      widget.store.deleteList(widget.checklist!.id);
+      Navigator.pop(context, 'Checklist deleted');
+    } else if (isTodo) {
       widget.store.deleteTodo(widget.todo!.id);
       Navigator.pop(context, 'Task deleted');
     } else {
       widget.store.deleteEvent(widget.event!.id);
       Navigator.pop(context, 'Event deleted');
     }
+  }
+
+  /// 체크한 항목 수로 계산한 진행도: 큰 퍼센트 숫자 + 'n / m done' (100%면 강조색)
+  Widget _progressBadge() {
+    final total = itemCtls.length, done = itemDone.where((d) => d).length;
+    final pct = total == 0 ? 0 : (done * 100 / total).round();
+    final full = total > 0 && done == total;
+    final color = full ? pal.accent : t100;
+    return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+        RollingText('$pct', alignment: Alignment.centerRight, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w200, height: 1, color: color)),
+        Padding(padding: const EdgeInsets.only(left: 3, bottom: 6), child: Text('%', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w300, color: full ? pal.accent : t50))),
+      ]),
+      const SizedBox(height: 4),
+      Text(total == 0 ? 'No items yet' : '$done / $total done', style: const TextStyle(fontSize: 11, color: t50)),
+    ]);
+  }
+
+  /// 체크리스트 항목 한 줄: 동그라미(체크) · 글자(고칠 수 있음) · 지우기
+  Widget _itemRow(int i) {
+    final d = itemDone[i];
+    return Row(key: ValueKey(itemIds[i]), children: [
+      TodoCircle(done: d, size: 16, accent: pal.accent, ink: pal.accentInk, onTap: () => setState(() => itemDone[i] = !d)),
+      const SizedBox(width: 8),
+      Expanded(
+        child: TextField(
+          controller: itemCtls[i],
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w300,
+            color: d ? t30 : t100,
+            decoration: d ? TextDecoration.lineThrough : TextDecoration.none,
+            decorationColor: t30,
+          ),
+          decoration: const InputDecoration(
+            isDense: true,
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(vertical: 9),
+          ),
+        ),
+      ),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        onPressed: () => _removeItem(i),
+        icon: const Icon(Icons.close, size: 14),
+        color: t30,
+        tooltip: 'Remove',
+      ),
+    ]);
   }
 
   /// 선택한 날짜·시작 시각의 예보 + 옷차림 한 줄 (+ 야외 일정이면 비 경고)
@@ -369,7 +483,7 @@ class _EditorDialogState extends State<_EditorDialog> {
   Widget build(BuildContext context) {
     final s = widget.store;
     final textStyle = const TextStyle(fontSize: 15, color: t100, fontWeight: FontWeight.w300);
-    final title = isNew ? 'New' : (mode == 'todo' ? 'Edit task' : 'Edit event');
+    final title = isNew ? 'New' : (mode == 'list' ? 'Edit checklist' : (mode == 'todo' ? 'Edit task' : 'Edit event'));
     return Dialog(
       backgroundColor: sheetColor(pal),
       insetPadding: const EdgeInsets.all(16),
@@ -379,7 +493,11 @@ class _EditorDialogState extends State<_EditorDialog> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(36, 32, 36, 24),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w200, color: t100)),
+            // 제목 줄: 제목과 진행도(%)는 위쪽 맞춤. 체크리스트 탭에서는 오른쪽 위에 진행도를 크게 보여줘요
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w200, color: t100))),
+              if (mode == 'list') _progressBadge(),
+            ]),
             const SizedBox(height: 20),
             if (isNew)
               Padding(
@@ -388,6 +506,8 @@ class _EditorDialogState extends State<_EditorDialog> {
                   TextTab(label: 'Event', on: mode == 'event', onTap: () => _switchTab('event')),
                   const SizedBox(width: 22),
                   TextTab(label: 'Task', on: mode == 'todo', onTap: () => _switchTab('todo')),
+                  const SizedBox(width: 22),
+                  TextTab(label: 'Checklist', on: mode == 'list', onTap: () => _switchTab('list')),
                 ]),
               ),
             if (mode == 'event') ...[
@@ -411,6 +531,15 @@ class _EditorDialogState extends State<_EditorDialog> {
                   ),
                 ),
               _weatherNote(),
+              // 위치: 구글 캘린더처럼 핀 아이콘 + 한 줄 입력 (직접 쓰는 글자만 저장, 기기 위치는 쓰지 않아요)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  const Icon(Icons.place_outlined, size: 18, color: t50),
+                  const SizedBox(width: 14),
+                  Expanded(child: TextField(controller: locationCtl, style: textStyle, decoration: underlineDecoration(pal.accent, hint: 'Add location'))),
+                ]),
+              ),
               _field(
                 'CATEGORY · REPEAT',
                 _two(
@@ -442,15 +571,32 @@ class _EditorDialogState extends State<_EditorDialog> {
                     style: const TextStyle(fontSize: 12, height: 1.6, color: Color(0xFFE9CF9A)),
                   ),
                 ),
+            ] else if (mode == 'list') ...[
+              _field('CHECKLIST', TextField(controller: listTitleCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 장보기, 여행 짐 싸기'))),
+              _field('DATE', UnderlineSelect(text: due.isEmpty ? 'Select date' : slashDate(due), onTap: () => _pickDate(due, (v) => due = v))),
+              Row(children: [
+                const FieldLabel('ITEMS'),
+                const Spacer(),
+                Text('${itemDone.where((d) => d).length} / ${itemCtls.length} done', style: const TextStyle(fontSize: 11, color: t50)),
+              ]),
+              for (var i = 0; i < itemCtls.length; i++) _itemRow(i),
+              Row(children: [
+                const SizedBox(width: 26),
+                Expanded(
+                  child: TextField(
+                    controller: newItemCtl,
+                    focusNode: newItemFocus,
+                    style: textStyle,
+                    decoration: underlineDecoration(pal.accent, hint: 'Add an item · Enter'),
+                    onSubmitted: (_) => _addItem(),
+                  ),
+                ),
+                IconButton(onPressed: _addItem, icon: const Icon(Icons.add, size: 18), color: t50, tooltip: 'Add item'),
+              ]),
+              const SizedBox(height: 6),
             ] else ...[
               _field('TASK', TextField(controller: todoCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 보고서 초안 쓰기'))),
-              _field(
-                'DUE  ·  비워 두면 Someday에 들어가요',
-                Row(children: [
-                  Expanded(child: UnderlineSelect(text: due.isEmpty ? 'No due date' : enFullDate(parseYmd(due)), onTap: () => _pickDate(due, (v) => due = v))),
-                  if (due.isNotEmpty) TextButton(style: textButton(), onPressed: () => setState(() => due = ''), child: const Text('Clear')),
-                ]),
-              ),
+              _field('DATE', UnderlineSelect(text: due.isEmpty ? 'Select date' : slashDate(due), onTap: () => _pickDate(due, (v) => due = v))),
               if (widget.todo != null)
                 Row(children: [
                   Checkbox(value: done, activeColor: pal.accent, checkColor: pal.accentInk, onChanged: (v) => setState(() => done = v ?? false)),

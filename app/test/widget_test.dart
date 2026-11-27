@@ -2,6 +2,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dayglow/core/calendar_logic.dart';
 import 'package:dayglow/core/models.dart';
+import 'package:dayglow/ui/strings.dart';
 import 'package:dayglow/mood/forecast.dart';
 
 void main() {
@@ -112,5 +113,16 @@ void main() {
     final ev = CalEvent(id: 'a', title: 'x', date: '2026-11-28', outdoor: true);
     expect(CalEvent.fromJson(ev.toJson()).outdoor, isTrue);
     expect(CalEvent.fromJson({'id': 'a', 'title': 'x', 'date': '2026-11-28'}).outdoor, isFalse); // 옛 백업 파일
+  });
+
+  test('일정 위치는 저장했다 불러와도 남고, 옛 백업 파일에는 빈 글자다', () {
+    final ev = CalEvent(id: 'a', title: '미팅', date: '2026-11-28', location: '강남역 2번 출구');
+    expect(CalEvent.fromJson(ev.toJson()).location, '강남역 2번 출구');
+    expect(CalEvent.fromJson({'id': 'a', 'title': 'x', 'date': '2026-11-28'}).location, '');
+  });
+
+  test('마감일은 2026  /  12  /  25 모양으로 보인다', () {
+    expect(slashDate('2026-12-25'), '2026  /  12  /  25');
+    expect(slashDate('2026-01-05'), '2026  /  01  /  05');
   });
 }

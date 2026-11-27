@@ -20,6 +20,7 @@ class CalEvent {
   int? remind; // 몇 분 전에 알릴지 (없으면 null)
   String memo;
   bool outdoor; // 야외 일정이면 true → 비 예보와 겹치면 알려줘요
+  String location; // 장소 (직접 입력한 글자. 위치 좌표가 아니에요)
 
   CalEvent({
     required this.id,
@@ -33,6 +34,7 @@ class CalEvent {
     this.remind,
     this.memo = '',
     this.outdoor = false,
+    this.location = '',
   });
 
   factory CalEvent.fromJson(Map<String, dynamic> j) => CalEvent(
@@ -47,6 +49,7 @@ class CalEvent {
         remind: (j['remind'] as num?)?.toInt(),
         memo: (j['memo'] ?? '') as String,
         outdoor: j['outdoor'] == true,
+        location: (j['location'] ?? '') as String,
       );
 
   Map<String, dynamic> toJson() => {
@@ -61,6 +64,7 @@ class CalEvent {
         'remind': remind,
         'memo': memo,
         'outdoor': outdoor,
+        'location': location,
       };
 
   CalEvent copy() => CalEvent.fromJson(toJson());
@@ -82,6 +86,44 @@ class Todo {
       );
 
   Map<String, dynamic> toJson() => {'id': id, 'text': text, 'due': due, 'done': done};
+}
+
+/// 체크리스트의 항목 하나
+class CheckItem {
+  String id;
+  String text;
+  bool done;
+
+  CheckItem({required this.id, required this.text, this.done = false});
+
+  factory CheckItem.fromJson(Map<String, dynamic> j) =>
+      CheckItem(id: j['id'] as String, text: j['text'] as String, done: j['done'] == true);
+
+  Map<String, dynamic> toJson() => {'id': id, 'text': text, 'done': done};
+}
+
+/// 체크리스트: 제목 하나에 항목 여러 개 (장보기, 여행 짐 싸기처럼 묶음으로 체크할 때)
+class Checklist {
+  String id;
+  String title;
+  String due; // 마감일 'YYYY-MM-DD', 없으면 ''
+  List<CheckItem> items;
+
+  Checklist({required this.id, required this.title, this.due = '', List<CheckItem>? items}) : items = items ?? [];
+
+  factory Checklist.fromJson(Map<String, dynamic> j) => Checklist(
+        id: j['id'] as String,
+        title: j['title'] as String,
+        due: (j['due'] ?? '') as String,
+        items: ((j['items'] ?? []) as List).map((x) => CheckItem.fromJson(Map<String, dynamic>.from(x as Map))).toList(),
+      );
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'due': due, 'items': items.map((i) => i.toJson()).toList()};
+
+  int get doneCount => items.where((i) => i.done).length;
+  bool get allDone => items.isNotEmpty && doneCount == items.length;
+
+  Checklist copy() => Checklist.fromJson(toJson());
 }
 
 class Category {

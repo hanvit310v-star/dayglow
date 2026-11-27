@@ -20,6 +20,7 @@ const activeHours = (start: 9, end: 22);
 class CalendarStore extends ChangeNotifier {
   List<CalEvent> events = [];
   List<Todo> todos = [];
+  List<Checklist> lists = []; // 체크리스트
   List<Category> cats = defaultCategories();
   SharedPreferences? _prefs;
 
@@ -31,6 +32,7 @@ class CalendarStore extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     events = _readList('cal_events', CalEvent.fromJson);
     todos = _readList('cal_todos', Todo.fromJson);
+    lists = _readList('cal_lists', Checklist.fromJson);
     final c = _readList('cal_cats', Category.fromJson);
     if (c.isNotEmpty) cats = c;
   }
@@ -79,10 +81,11 @@ class CalendarStore extends ChangeNotifier {
     final s = sync!;
     // 서버 상태를 직접 확인 (인터넷이 없으면 여기서 오류 → 다음 실행 때 다시 시도)
     const src = GetOptions(source: Source.server);
-    final res = await Future.wait([s.col('events', uid).get(src), s.col('todos', uid).get(src), s.col('cats', uid).get(src)]);
+    final res = await Future.wait([s.col('events', uid).get(src), s.col('todos', uid).get(src), s.col('cats', uid).get(src), s.col('lists', uid).get(src)]);
     final cloudEv = res[0].docs.map((d) => d.id).toSet();
     final cloudTodo = res[1].docs.map((d) => d.id).toSet();
     final cloudCat = res[2].docs.map((d) => d.id).toSet();
+    final cloudList = res[3].docs.map((d) => d.id).toSet();
 
     final batch = FirebaseFirestore.instance.batch();
     for (final e in events.where((e) => !cloudEv.contains(e.id))) {
@@ -90,6 +93,9 @@ class CalendarStore extends ChangeNotifier {
     }
     for (final t in todos.where((t) => !cloudTodo.contains(t.id))) {
       batch.set(s.col('todos', uid).doc(t.id), _payload(t.toJson()));
+    }
+    for (final l in lists.where((l) => !cloudList.contains(l.id))) {
+      batch.set(s.col('lists', uid).doc(l.id), _payload(l.toJson()));
     }
     for (var i = 0; i < cats.length; i++) {
       final c = cats[i];
@@ -113,6 +119,12 @@ class CalendarStore extends ChangeNotifier {
 
     _subs.add(s.col('todos', uid).snapshots().listen((snap) {
       todos = _parse(snap, Todo.fromJson)..sort((a, b) => a.id.compareTo(b.id));
+      _saveLocal();
+      notifyListeners();
+    }, onError: onErr));
+
+    _subs.add(s.col('lists', uid).snapshots().listen((snap) {
+      lists = _parse(snap, Checklist.fromJson)..sort((a, b) => a.id.compareTo(b.id));
       _saveLocal();
       notifyListeners();
     }, onError: onErr));
@@ -187,7 +199,7 @@ class CalendarStore extends ChangeNotifier {
     if (s == null || uid == null) return '로그인되어 있지 않아요.';
     try {
       await _stopListening();
-      for (final name in const ['events', 'todos', 'cats']) {
+      for (final name in const ['events', 'todos', 'cats', 'lists']) {
         final snap = await s.col(name, uid).get(const GetOptions(source: Source.server));
         for (var i = 0; i < snap.docs.length; i += 400) {
           final batch = FirebaseFirestore.instance.batch();
@@ -210,6 +222,7 @@ class CalendarStore extends ChangeNotifier {
   void _clearLocal() {
     events = [];
     todos = [];
+    lists = [];
     cats = defaultCategories();
     _prefs?.remove('cal_synced_uid');
     _saveLocal();
@@ -241,6 +254,7 @@ class CalendarStore extends ChangeNotifier {
     if (p != null) {
       p.setString('cal_events', jsonEncode(events.map((e) => e.toJson()).toList()));
       p.setString('cal_todos', jsonEncode(todos.map((e) => e.toJson()).toList()));
+      p.setString('cal_lists', jsonEncode(lists.map((e) => e.toJson()).toList()));
       p.setString('cal_cats', jsonEncode(cats.map((e) => e.toJson()).toList()));
     }
   }
@@ -272,6 +286,9 @@ class CalendarStore extends ChangeNotifier {
     }
     return list;
   }
+
+  /// 그날 마감인 체크리스트
+  List<Checklist> listsDue(String ds) => lists.where((l) => l.due == ds).toList();
 
   List<Todo> get undatedTodos => todos.where((t) => t.due.isEmpty).toList();
 
@@ -378,6 +395,39 @@ class CalendarStore extends ChangeNotifier {
       _cloudDelete('todos', t.id);
     }
     return gone.length;
+  }
+
+  // ===== 체크리스트 =====
+  void upsertList(Checklist l) {
+    final i = lists.indexWhere((x) => x.id == l.id);
+    if (i >= 0) {
+      lists[i] = l;
+    } else {
+      lists.add(l);
+    }
+    _save();
+    _cloudSet('lists', l.id, l.toJson());
+  }
+
+  void deleteList(String id) {
+    lists.removeWhere((l) => l.id == id);
+    _save();
+    _cloudDelete('lists', id);
+  }
+
+  void toggleListItem(String listId, String itemId) {
+    final l = lists.firstWhere((x) => x.id == listId);
+    final it = l.items.firstWhere((x) => x.id == itemId);
+    it.done = !it.done;
+    _save();
+    _cloudSet('lists', l.id, l.toJson());
+  }
+
+  void addListItem(String listId, String text) {
+    final l = lists.firstWhere((x) => x.id == listId);
+    l.items.add(CheckItem(id: newId(), text: text));
+    _save();
+    _cloudSet('lists', l.id, l.toJson());
   }
 
   void setCategoryOn(String id, bool on) {

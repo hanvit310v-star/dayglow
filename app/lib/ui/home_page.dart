@@ -33,6 +33,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String sel = todayStr();
   String query = '';
   bool todoOpen = false;
+  final Set<String> listOpen = {}; // 펼쳐 둔 체크리스트
+  final Map<String, TextEditingController> listAddCtl = {}; // 체크리스트별 '항목 추가' 입력칸
   bool skyMap = false; // 월간 보기를 날씨 색으로 칠하기
   final searchCtl = TextEditingController();
   final todoCtl = TextEditingController();
@@ -66,6 +68,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _minute?.cancel();
     searchCtl.dispose();
     todoCtl.dispose();
+    for (final c in listAddCtl.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -90,11 +95,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void toast(String m, {VoidCallback? undo}) => showToast(context, paletteOf(mood.theme), m, undo: undo);
 
-  Future<void> openEditor({CalEvent? event, Todo? todo, String? date, int? hour, bool fromCell = false}) async {
+  Future<void> openEditor({CalEvent? event, Todo? todo, Checklist? checklist, bool startList = false, String? date, int? hour, bool fromCell = false}) async {
     final msg = await showEditor(context,
-        store: store, pal: paletteOf(mood.theme), event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: mood.forecast);
+        store: store, pal: paletteOf(mood.theme), event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: mood.forecast, checklist: checklist, startList: startList);
     if (msg != null && mounted) {
-      if (event == null && todo == null && date != null) sel = date;
+      if (event == null && todo == null && checklist == null && date != null) sel = date;
       toast(msg);
     }
   }
@@ -205,6 +210,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       store.deleteEvent(e.id);
       toast('Event deleted', undo: () => store.upsertEvent(backup));
     },
+    openList: (l) => openEditor(checklist: l),
     rainHelp: (e, ds) => rainHelp(e, ds),
     forecast: mood.forecast,
     toggleTodo: store.toggleTodo,
@@ -390,13 +396,7 @@ class _LeftPane extends StatelessWidget {
         top,
         Padding(
           padding: EdgeInsets.only(top: wide ? 30 : 22, bottom: 14),
-          child: Row(children: [
-            RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
-            if (s.view == 'month' && s.skyMap) ...[
-              const Spacer(),
-              _SkyLegend(place: s.mood.forecast.place, compact: compact),
-            ],
-          ]),
+          child: RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
         ),
         if (wide) Expanded(child: switcher) else switcher,
         SizedBox(height: wide ? 30 : 24),
@@ -404,25 +404,6 @@ class _LeftPane extends StatelessWidget {
       ]),
     );
   }
-}
-
-/// 월간 날씨 보기의 색 안내: 색 점 + 이름 (어느 지역 예보인지도)
-class _SkyLegend extends StatelessWidget {
-  final String place;
-  final bool compact;
-  const _SkyLegend({required this.place, required this.compact});
-
-  @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-        if (!compact)
-          for (final t in const ['clear', 'cloudy', 'rain', 'snow', 'storm']) ...[
-            Container(width: 6, height: 6, decoration: BoxDecoration(color: wxTint(t), shape: BoxShape.circle)),
-            const SizedBox(width: 5),
-            Text(weatherLabelEn(t), style: const TextStyle(fontSize: 10.5, color: t50)),
-            const SizedBox(width: 12),
-          ],
-        Text('Forecast · ${place.isEmpty ? '—' : place}', style: const TextStyle(fontSize: 10.5, color: t30)),
-      ]);
 }
 
 /// 왼쪽 아래 구석: 선택한 날을 크게 (주인공 하나만 크게, 나머지는 작게)
@@ -626,7 +607,7 @@ class _RightPanel extends StatelessWidget {
   Widget _results(BuildContext context) {
     final s = state;
     final q = s.query.toLowerCase();
-    final hits = s.store.events.where((e) => '${e.title} ${e.memo}'.toLowerCase().contains(q)).toList()
+    final hits = s.store.events.where((e) => '${e.title} ${e.memo} ${e.location}'.toLowerCase().contains(q)).toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     return Padding(
       padding: const EdgeInsets.only(top: 26),
@@ -652,6 +633,100 @@ class _RightPanel extends StatelessWidget {
     );
   }
 
+  /// 안 끝난 것(마감 빠른 순, 마감 없는 건 뒤) → 다 끝낸 것 순서
+  List<Checklist> sortedLists(List<Checklist> all) {
+    int rank(Checklist l) => l.allDone ? 2 : (l.due.isEmpty ? 1 : 0);
+    return [...all]..sort((a, b) {
+        final r = rank(a).compareTo(rank(b));
+        return r != 0 ? r : (rank(a) == 0 ? a.due.compareTo(b.due) : a.id.compareTo(b.id));
+      });
+  }
+
+  /// 체크리스트 한 장: 제목 · 마감 · 진행률 바 · (펼치면) 항목 체크 + 항목 추가
+  Widget _checklistCard(BuildContext context, Checklist l) {
+    final s = state, st = s.store;
+    final open = s.listOpen.contains(l.id);
+    final total = l.items.length;
+    final over = l.due.isNotEmpty && !l.allDone && l.due.compareTo(todayStr()) < 0;
+    final addCtl = s.listAddCtl.putIfAbsent(l.id, () => TextEditingController());
+    void add() {
+      final t = addCtl.text.trim();
+      if (t.isEmpty) return;
+      st.addListItem(l.id, t);
+      addCtl.clear();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Pressable(
+          pressedScale: .985,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => s.update(() => open ? s.listOpen.remove(l.id) : s.listOpen.add(l.id)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(children: [
+                AnimatedRotation(
+                  turns: open ? .5 : 0,
+                  duration: Motion.of(context, Motion.base),
+                  curve: Motion.ease,
+                  child: const Icon(Icons.expand_more, size: 16, color: t30),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: todoText(context, l.title, done: l.allDone, over: over, size: 13, normal: t100)),
+                if (l.due.isNotEmpty) ...[
+                  Text(enMonthDay(l.due), style: TextStyle(fontSize: 11, color: over ? softRed : t50)),
+                  const SizedBox(width: 10),
+                ],
+                RollingText('${l.doneCount}/$total', style: const TextStyle(fontSize: 12, color: t70)),
+              ]),
+            ),
+          ),
+        ),
+        // 진행률 바 (체크할 때마다 부드럽게 차오름)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(end: total == 0 ? 0 : l.doneCount / total),
+            duration: Motion.of(context, Motion.slow),
+            curve: Motion.ease,
+            builder: (_, v, _) => LinearProgressIndicator(value: v, minHeight: 2, backgroundColor: hairline, color: pal.accent),
+          ),
+        ),
+        AnimatedSize(
+          duration: Motion.of(context, Motion.slow),
+          curve: Motion.ease,
+          alignment: Alignment.topCenter,
+          child: !open
+              ? const SizedBox(width: double.infinity)
+              : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const SizedBox(height: 6),
+                  for (final it in l.items)
+                    _item(
+                      lead: TodoCircle(done: it.done, accent: pal.accent, ink: pal.accentInk, onTap: () => st.toggleListItem(l.id, it.id)),
+                      text: it.text,
+                      value: '',
+                      done: it.done,
+                      onTap: () => st.toggleListItem(l.id, it.id),
+                    ),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: addCtl,
+                        style: const TextStyle(fontSize: 13, color: t100),
+                        decoration: underlineDecoration(pal.accent, hint: 'Add an item'),
+                        onSubmitted: (_) => add(),
+                      ),
+                    ),
+                    TextButton(style: textButton(), onPressed: () => s.openEditor(checklist: l), child: const Text('Edit')),
+                  ]),
+                ]),
+        ),
+      ]),
+    );
+  }
+
   Widget _sections(BuildContext context) {
     final s = state;
     final st = s.store;
@@ -662,6 +737,7 @@ class _RightPanel extends StatelessWidget {
     final dayTodos = st.todos.where((t) => t.due == ds).toList();
     final undated = st.undatedTodos;
     final fc = s.mood.forecast;
+    final lds = st.listsDue(ds); // 그날 마감인 체크리스트
     final dw = fc.day(ds);
     final walk = walkWindow(ds, fc, (d) => st.eventsOn(d, onlyVisible: false)); // 산책하기 좋은 시간
     final open = undated.where((t) => !t.done).toList();
@@ -685,7 +761,7 @@ class _RightPanel extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 30),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _sectionHead(ds == today ? 'Today' : enDayLabel(ds)),
-          if (evs.isEmpty && tds.isEmpty)
+          if (evs.isEmpty && tds.isEmpty && lds.isEmpty)
             StaggerIn(key: ValueKey('empty$ds'), index: 0, child: const Text('Nothing planned', style: TextStyle(fontSize: 13, color: t30))),
           // 날짜를 바꾸면 항목이 하나씩 차례로 떠오름 (key에 날짜를 넣어 매번 다시 재생)
           for (final e in evs)
@@ -714,6 +790,18 @@ class _RightPanel extends StatelessWidget {
                 onTap: () => s.openEditor(todo: x.t),
               ),
             ),
+          for (final l in lds)
+            StaggerIn(
+              key: ValueKey('$ds-l${l.id}'),
+              index: n++,
+              child: _item(
+                lead: const Icon(Icons.checklist, size: 14, color: t50),
+                text: l.title,
+                value: '${l.doneCount}/${l.items.length}',
+                done: l.allDone,
+                onTap: () => s.openEditor(checklist: l),
+              ),
+            ),
           // 날씨 좋고 비어 있는 시간 제안
           if (walk != null)
             StaggerIn(
@@ -724,6 +812,18 @@ class _RightPanel extends StatelessWidget {
         ]),
       ),
       divider(),
+      // 체크리스트: 진행률을 보고, 펼쳐서 바로 체크
+      if (st.lists.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 26),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _sectionHead('Checklists',
+                trailing: TextButton(style: textButton(), onPressed: () => s.openEditor(startList: true), child: const Text('+ New'))),
+            for (final l in sortedLists(st.lists)) _checklistCard(context, l),
+          ]),
+        ),
+        divider(),
+      ],
       // 하루 요약: 항목명은 흐리게 왼쪽, 수치는 선명하게 오른쪽
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 30),

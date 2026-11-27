@@ -23,6 +23,7 @@ class CalendarActions {
   final void Function(CalEvent e) duplicateEvent;
   final void Function(CalEvent e) postponeEvent; // 하루 뒤로 미루기
   final void Function(CalEvent e) deleteEvent;
+  final void Function(Checklist l) openList; // 체크리스트 칩을 누르면 편집창
   final void Function(CalEvent e, String ds) rainHelp; // 우산 표시를 누르면: 더 좋은 시간 안내
   final Forecast forecast; // 날씨 예보 (일정 칩 질감·하늘 띠·날씨 보기에 사용)
   const CalendarActions({
@@ -35,6 +36,7 @@ class CalendarActions {
     required this.duplicateEvent,
     required this.postponeEvent,
     required this.deleteEvent,
+    required this.openList,
     required this.rainHelp,
     required this.forecast,
   });
@@ -135,6 +137,33 @@ Widget eventChip(CalendarStore store, CalEvent e, CalendarActions a, String ds) 
       ),
     );
 }
+
+/// 마감일이 있는 체크리스트: 달력 칸에 '☑ 제목 2/5' 한 줄로 보임
+Widget listChip(Checklist l, CalendarActions a) => Pressable(
+      child: GestureDetector(
+        onTap: () => a.openList(l),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: Row(children: [
+            Icon(l.allDone ? Icons.check_box_outlined : Icons.checklist, size: 11, color: l.allDone ? t30 : t50),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(l.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: l.allDone ? t30 : t70,
+                    decoration: l.allDone ? TextDecoration.lineThrough : TextDecoration.none,
+                    decorationColor: t30,
+                  )),
+            ),
+            Text('${l.doneCount}/${l.items.length}', style: const TextStyle(fontSize: 10, color: t30)),
+          ]),
+        ),
+      ),
+    );
 
 Widget todoChip(({Todo t, bool over}) x, CalendarActions a, Color accent, Color ink) => Builder(
       builder: (context) => Pressable(
@@ -319,9 +348,11 @@ class MonthView extends StatelessWidget {
       final tds = store.todosOn(ds);
       final late = ds == today ? tds.where((x) => x.over).toList() : <({Todo t, bool over})>[];
       final rest = tds.where((x) => !late.contains(x)).toList();
+      final lds = store.listsDue(ds);
       final items = <Widget>[
         ...late.map((x) => todoChip(x, actions, accent, ink)),
         ...store.eventsOn(ds).map((e) => eventChip(store, e, actions, ds)),
+        ...lds.map((l) => listChip(l, actions)),
         ...rest.map((x) => todoChip(x, actions, accent, ink)),
       ];
       final other = d.month != cursor.month;
@@ -383,7 +414,7 @@ class MonthView extends StatelessWidget {
                 Wrap(spacing: 3, children: [
                   for (final e in store.eventsOn(ds).take(3))
                     Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
-                  if (tds.isNotEmpty) Container(width: 5, height: 5, decoration: BoxDecoration(border: Border.all(color: t50), shape: BoxShape.circle)),
+                  if (tds.isNotEmpty || lds.isNotEmpty) Container(width: 5, height: 5, decoration: BoxDecoration(border: Border.all(color: t50), shape: BoxShape.circle)),
                 ])
               else ...[
                 ...items.take(maxShown),
@@ -528,6 +559,7 @@ class _TimeGridViewState extends State<TimeGridView> {
                   padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     for (final e in s.eventsOn(ymd(d)).where((e) => e.allDay)) eventChip(s, e, a, ymd(d)),
+                    for (final l in s.listsDue(ymd(d))) listChip(l, a),
                     for (final x in s.todosOn(ymd(d))) todoChip(x, a, widget.accent, widget.ink),
                   ]),
                 ),
@@ -603,7 +635,16 @@ class _TimeGridViewState extends State<TimeGridView> {
                                         Padding(
                                           padding: const EdgeInsets.fromLTRB(9, 4, 6, 2),
                                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                            Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
+                                            // 첫 줄: 시작 시각 + (있으면) 위치 → 짧은 일정에서도 제목이 가려지지 않아요
+                                            Row(children: [
+                                              Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
+                                              if (p.e.location.isNotEmpty) ...[
+                                                const SizedBox(width: 6),
+                                                const Icon(Icons.place_outlined, size: 10, color: t50),
+                                                const SizedBox(width: 1),
+                                                Expanded(child: Text(p.e.location, maxLines: 1, overflow: TextOverflow.fade, softWrap: false, style: const TextStyle(fontSize: 10, color: t50))),
+                                              ],
+                                            ]),
                                             Flexible(
                                               child: Text(p.e.title, overflow: TextOverflow.fade, style: const TextStyle(fontSize: 11.5, color: t100)),
                                             ),

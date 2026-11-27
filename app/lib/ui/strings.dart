@@ -20,3 +20,9 @@ String enFullDate(DateTime d) => '${monthShortEn[d.month - 1]} ${d.day}, ${d.yea
 
 /// 'Thu, Nov 26'
 String enDayLabel(String ds) => '${weekdayTitleEn[weekdayIndex(parseYmd(ds))]}, ${enMonthDay(ds)}';
+
+/// '2026  /  12  /  25' — 마감일 칸에 쓰는 모양 (슬래시 양옆에 여백)
+String slashDate(String ds) {
+  final d = parseYmd(ds);
+  return '${d.year}  /  ${pad2(d.month)}  /  ${pad2(d.day)}';
+}

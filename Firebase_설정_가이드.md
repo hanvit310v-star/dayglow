@@ -87,6 +87,7 @@ flutter run -d chrome
 users/{내 계정 번호}/events/{일정 번호}
 users/{내 계정 번호}/todos/{할 일 번호}
 users/{내 계정 번호}/cats/{카테고리 번호}
+users/{내 계정 번호}/lists/{체크리스트 번호}
 ```
 
 ## 문제가 생기면
