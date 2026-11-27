@@ -1,6 +1,6 @@
 {
-    "name": "my_calendar",
-    "short_name": "my_calendar",
+    "name": "Dayglow",
+    "short_name": "Dayglow",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

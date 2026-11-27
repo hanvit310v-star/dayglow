@@ -1,4 +1,4 @@
-# my_calendar
+# Dayglow
 
 날씨와 상황에 따라 분위기가 바뀌는 캘린더
 

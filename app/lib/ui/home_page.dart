@@ -270,9 +270,8 @@ class _LeftPane extends StatelessWidget {
       ),
     ]);
     const brand = Text.rich(TextSpan(children: [
-      TextSpan(text: 'my'),
-      TextSpan(text: '.', style: TextStyle(color: Color(0xFFA3BDB3))),
-      TextSpan(text: 'calendar'),
+      TextSpan(text: 'Day'),
+      TextSpan(text: 'glow', style: TextStyle(color: Color(0xFFA3BDB3))),
     ]), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: t100, letterSpacing: .3));
 
     final top = wide

@@ -1,6 +1,5 @@
 // 월 보기 · 주/일 보기
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:material_ui/material_ui.dart';
 
@@ -85,7 +84,7 @@ Widget todoText(BuildContext context, String text, {required bool done, required
       duration: Motion.of(context, Motion.base),
       curve: Motion.ease,
       style: TextStyle(
-        fontFamily: 'MyCalendarSans',
+        fontFamily: 'DayglowSans',
         fontWeight: FontWeight.w300,
         fontSize: size,
         color: over ? softRed : (done ? t30 : normal),
@@ -105,12 +104,13 @@ List<HoverChipSpec> eventHoverChips(CalEvent e, CalendarActions a) => [
 
 Widget eventChip(CalendarStore store, CalEvent e, CalendarActions a) => HoverChips(
       chips: eventHoverChips(e, a),
+      barColor: hexColor(store.catOf(e.cat).color),
       child: Pressable(
         child: GestureDetector(
           onTap: () => a.openEvent(e),
           behavior: HitTestBehavior.opaque,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1.5),
+            padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
             child: Row(children: [
               Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
               const SizedBox(width: 6),
@@ -154,7 +154,8 @@ class HoverChips extends StatefulWidget {
   final Widget child;
   final List<HoverChipSpec> chips;
   final Alignment alignment; // centerRight: 한 줄 일정 · topRight: 큰 블록
-  const HoverChips({super.key, required this.child, required this.chips, this.alignment = Alignment.centerRight});
+  final Color? barColor; // 호버하면 일정 전체가 이 색의 반투명 바로 바뀜 (null이면 바 없음)
+  const HoverChips({super.key, required this.child, required this.chips, this.alignment = Alignment.centerRight, this.barColor});
   @override
   State<HoverChips> createState() => _HoverChipsState();
 }
@@ -168,6 +169,30 @@ class _HoverChipsState extends State<HoverChips> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Stack(clipBehavior: Clip.none, children: [
+        // 사진처럼 둥근 모서리의 넓은 칩: 반투명 색 바 + 왼쪽 굵은 줄
+        if (widget.barColor != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedContainer(
+                duration: Motion.of(context, Motion.base),
+                curve: Motion.ease,
+                decoration: BoxDecoration(
+                  color: widget.barColor!.withAlpha(_hover ? 96 : 0),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AnimatedContainer(
+                    duration: Motion.of(context, Motion.base),
+                    width: 3,
+                    height: _hover ? double.infinity : 0,
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    decoration: BoxDecoration(color: widget.barColor, borderRadius: BorderRadius.circular(3)),
+                  ),
+                ),
+              ),
+            ),
+          ),
         widget.child,
         Positioned.fill(
           child: Align(
@@ -223,23 +248,16 @@ class _HoverChipState extends State<_HoverChip> {
           child: GestureDetector(
             onTap: c.onTap,
             behavior: HitTestBehavior.opaque,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(99),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                child: AnimatedContainer(
-                  duration: Motion.of(context, Motion.fast),
-                  width: 22,
-                  height: 18,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _on ? const Color(0x38FFFFFF) : const Color(0x1FFFFFFF),
-                    borderRadius: BorderRadius.circular(99),
-                    border: Border.all(color: const Color(0x29FFFFFF)),
-                  ),
-                  child: Icon(c.icon, size: 11.5, color: fg),
-                ),
+            child: AnimatedContainer(
+              duration: Motion.of(context, Motion.fast),
+              width: 24,
+              height: 18,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _on ? const Color(0x4DFFFFFF) : const Color(0x26FFFFFF),
+                borderRadius: BorderRadius.circular(6),
               ),
+              child: Icon(c.icon, size: 12, color: fg),
             ),
           ),
         ),
@@ -317,7 +335,7 @@ class MonthView extends StatelessWidget {
                 child: AnimatedDefaultTextStyle(
                   duration: Motion.of(context, Motion.base),
                   style: TextStyle(
-                    fontFamily: 'MyCalendarSans',
+                    fontFamily: 'DayglowSans',
                     fontSize: 13,
                     color: ds == today || isSel ? t100 : (other ? t30.withAlpha(46) : t50),
                     fontWeight: ds == today ? FontWeight.w400 : FontWeight.w300,
@@ -440,7 +458,7 @@ class _TimeGridViewState extends State<TimeGridView> {
                     AnimatedDefaultTextStyle(
                       duration: Motion.of(context, Motion.base),
                       style: TextStyle(
-                        fontFamily: 'MyCalendarSans',
+                        fontFamily: 'DayglowSans',
                         fontSize: 26,
                         fontWeight: FontWeight.w200,
                         color: ymd(d) == widget.sel ? widget.accent : (ymd(d) == today ? t100 : t70),
@@ -524,16 +542,17 @@ class _TimeGridViewState extends State<TimeGridView> {
                               child: HoverChips(
                                 chips: eventHoverChips(p.e, a),
                                 alignment: Alignment.topRight,
+                                barColor: hexColor(s.catOf(p.e.cat).color),
                                 child: Pressable(
                                   pressedScale: .97,
                                   hoverGlow: true,
                                   child: GestureDetector(
                                     onTap: () => a.openEvent(p.e),
                                     child: Container(
-                                      padding: const EdgeInsets.fromLTRB(7, 4, 6, 2),
+                                      padding: const EdgeInsets.fromLTRB(9, 4, 6, 2),
                                       decoration: BoxDecoration(
                                         color: hexColor(s.catOf(p.e.cat).color).withAlpha(38),
-                                        border: Border(left: BorderSide(color: hexColor(s.catOf(p.e.cat).color), width: 2)),
+                                        borderRadius: BorderRadius.circular(7),
                                       ),
                                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                         Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),

@@ -69,7 +69,7 @@ class TextTab extends StatelessWidget {
               Row(mainAxisSize: MainAxisSize.min, children: [
                 AnimatedDefaultTextStyle(
                   duration: Motion.of(context, Motion.base),
-                  style: TextStyle(fontFamily: 'MyCalendarSans', fontWeight: FontWeight.w300, fontSize: 13, color: on ? t100 : t50),
+                  style: TextStyle(fontFamily: 'DayglowSans', fontWeight: FontWeight.w300, fontSize: 13, color: on ? t100 : t50),
                   child: Text(label),
                 ),
                 if (trailing != null) ...[const SizedBox(width: 4), trailing!],

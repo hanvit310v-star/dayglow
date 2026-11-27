@@ -1,4 +1,4 @@
-name: my_calendar
+name: dayglow
 description: "날씨와 상황에 따라 분위기가 바뀌는 캘린더"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -68,15 +68,15 @@ flutter:
   assets:
     - assets/fonts/OFL-Pretendard-LICENSE.txt
   fonts:
-    - family: MyCalendarSans
+    - family: DayglowSans
       fonts:
-        - asset: assets/fonts/MyCalendarSans-ExtraLight.otf
+        - asset: assets/fonts/DayglowSans-ExtraLight.otf
           weight: 200
-        - asset: assets/fonts/MyCalendarSans-Light.otf
+        - asset: assets/fonts/DayglowSans-Light.otf
           weight: 300
-        - asset: assets/fonts/MyCalendarSans-Regular.otf
+        - asset: assets/fonts/DayglowSans-Regular.otf
           weight: 400
-        - asset: assets/fonts/MyCalendarSans-Medium.otf
+        - asset: assets/fonts/DayglowSans-Medium.otf
           weight: 500
 
   # To add assets to your application, add an assets section, like this:

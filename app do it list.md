@@ -8,12 +8,12 @@
 ## 0. 지금까지의 상황 (Claude가 먼저 읽을 부분)
 
 ### 프로젝트
-- 작업 폴더: `~/Desktop/calendar-vibe-coding` (예전 이름 `캘린더 바이브코딩` — 한글·띄어쓰기 경로는 빌드 오류 위험이라 변경함)
+- 작업 폴더: `~/Desktop/dayglow` (예전 이름 `calendar-vibe-coding`, 그 전엔 `캘린더 바이브코딩` — 한글·띄어쓰기 경로는 빌드 오류 위험이라 변경함)
 - 기획 문서: `20261126_캘린더_PRD.md` (특히 **14장 "앱 출시 계획"**)
 - 예전 웹 버전(설계도): `index.html` — 백업·알림·단축키 등 아직 앱에 옮기지 않은 기능의 참고용
 - **Flutter 앱**: `app/` (iOS·안드로이드·웹을 한 코드로)
   - `lib/core` 날짜 계산·데이터 모양 / `lib/data` 저장소(기기 안) / `lib/mood` 날씨·상황 / `lib/ui` 화면
-  - 글꼴: `assets/fonts/MyCalendarSans-*.otf` (Pretendard를 2,350자로 줄여 이름 변경, SIL OFL 1.1, 라이선스 파일 포함)
+  - 글꼴: `assets/fonts/DayglowSans-*.otf` (Pretendard를 2,350자로 줄여 이름 변경, SIL OFL 1.1, 라이선스 파일 포함)
 
 ### 결정된 사항
 - **안드로이드 먼저 출시**, iOS는 나중 (`ios` 폴더는 유지)
@@ -34,10 +34,10 @@
 | Material 패키지 | 이 Flutter 버전은 `package:material_ui/material_ui.dart` 사용 (예전 `package:flutter/material.dart` 아님) |
 
 ### 배포 상태
-- **웹**: ✅ https://my-calendar-sandy-zeta.vercel.app (Vercel 프로젝트 `my-calendar`, GitHub와 연결됨)
+- **웹**: ✅ https://dayglow.vercel.app (Vercel 프로젝트 `dayglow`, GitHub와 연결됨)
   - **재배포 = GitHub `main`에 올리기만 하면 자동** (Vercel이 Flutter 3.50.1을 받아 `app/`을 빌드, 약 2분). 설정: 맨 위 폴더의 `vercel.json`, `.vercelignore`
   - Flutter 버전을 올리면 `vercel.json`의 `-b 3.50.1`도 같이 바꾸기
-- **GitHub**: ✅ https://github.com/hanvit310v-star/my-calendar (공개 저장소, `main` 브랜치)
+- **GitHub**: ✅ https://github.com/hanvit310v-star/dayglow (공개 저장소, `main` 브랜치)
   - 올리지 않는 파일: `.gitignore` 참고 (`.env*`, `.vercel`, `*.jks`, `key.properties`, `.claude/`, 빌드 결과물)
   - ⚠️ 공개 저장소이므로 서명 키·비밀번호·토큰이 절대 커밋되지 않게 주의
 - **Google Play**: ❌ 아직
@@ -58,9 +58,9 @@
   `echo 'export PATH="$HOME/development/flutter/bin:$PATH"' >> ~/.zshrc`
 
 ## 2. 앱 정체성 확정 (⚠️ 첫 업로드 전에! 앱 식별자는 출시 후 변경 불가)
-- [ ] **앱 이름** 정하기 → `app/android/app/src/main/AndroidManifest.xml`의 `android:label="my_calendar"` 변경
-- [ ] **앱 식별자(패키지 이름)** 정하기 (예: `kr.본인도메인.calendar`) → 현재 임시값 `com.mycalendar.my_calendar`
-  - 바꿀 곳: `app/android/app/build.gradle.kts`의 `namespace`, `applicationId` / `MainActivity.kt`의 `package` 줄과 폴더 경로 (`android/app/src/main/kotlin/com/mycalendar/my_calendar/`)
+- [ ] **앱 이름** 정하기 → `app/android/app/src/main/AndroidManifest.xml`의 `android:label` (현재 `Dayglow`)
+- [ ] **앱 식별자(패키지 이름)** 정하기 (예: `kr.본인도메인.calendar`) → 현재 값 `com.dayglow.dayglow` (2026-11-27 변경, 출시 전 최종 확인)
+  - 바꿀 곳: `app/android/app/build.gradle.kts`의 `namespace`, `applicationId` / `MainActivity.kt`의 `package` 줄과 폴더 경로 (`android/app/src/main/kotlin/com/dayglow/dayglow/`)
 - [ ] **앱 아이콘** 만들기 (512×512 PNG 원본) → `flutter_launcher_icons` 패키지로 모든 크기 생성
 - [ ] 웹 제목도 맞추기: `app/web/index.html`의 `<title>`, `app/web/manifest.json`의 `name`
 - [ ] 버전: `app/pubspec.yaml`의 `version: 1.0.0+1` (+ 뒤 숫자는 올릴 때마다 증가)
@@ -77,14 +77,14 @@
 ## 4. 앱 서명 키 (⚠️ 잃어버리면 앱 업데이트 불가 — 안전한 곳에 백업)
 - [ ] 업로드 키 만들기 — **비밀번호가 들어가므로 사용자가 직접 터미널에서 실행**:
   ```
-  "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool" -genkey -v -keystore ~/my-calendar-upload.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+  "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/keytool" -genkey -v -keystore ~/dayglow-upload.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
   ```
 - [ ] `app/android/key.properties` 작성 (사용자가 직접 비밀번호 입력, **절대 GitHub·채팅에 올리지 않기**):
   ```
   storePassword=(직접 입력)
   keyPassword=(직접 입력)
   keyAlias=upload
-  storeFile=/Users/morecatplz/my-calendar-upload.jks
+  storeFile=/Users/morecatplz/dayglow-upload.jks
   ```
 - [ ] `app/android/.gitignore`에 `key.properties`, `*.jks` 들어 있는지 확인
 - [ ] `app/android/app/build.gradle.kts`에 release 서명 설정 추가 (현재 `signingConfig = signingConfigs.getByName("debug")` → key.properties를 읽는 release 설정으로) — Flutter 공식 문서 "Build and release an Android app" 참고
@@ -108,7 +108,7 @@
 - [ ] 오픈소스 라이선스 고지 (Pretendard OFL 등 — 앱 설정에 "오픈소스 라이선스" 메뉴 추가 권장, Flutter `showLicensePage` 사용)
 
 ## 7. GitHub (코드 보관·백업)
-- [x] 저장소 연결·최신화 (2026-11-26, https://github.com/hanvit310v-star/my-calendar)
+- [x] 저장소 연결·최신화 (2026-11-26, https://github.com/hanvit310v-star/dayglow)
 - [x] Vercel 자동 배포 연결 (main에 올리면 웹 링크 자동 갱신)
 - [ ] (선택) 저장소를 비공개로 바꿀지 결정 — 출시 앱 코드 공개 여부. 비공개로 바꿔도 Vercel 자동 배포는 그대로 동작
 - [ ] (선택) GitHub 저장소 오른쪽 "About" → Website에 웹 주소 입력 (사용자가 GitHub 화면에서 직접)

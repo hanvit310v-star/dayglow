@@ -1,12 +1,14 @@
-# my.calendar
+# Dayglow
 
 날씨와 상황에 따라 분위기가 바뀌는 캘린더 (국민대학교 AX-Startup 부트캠프 실습)
 
 ### 🌐 바로 사용하기
-**https://my-calendar-sandy-zeta.vercel.app**
+**https://dayglow.vercel.app**
 
 PC·폰 브라우저에서 열면 됩니다. 일정은 각자의 브라우저에만 저장돼요.
 위치를 허용하면 내 위치의 날씨(맑음·비·눈·안개 등)와 시간대(새벽·노을·밤)에 맞춰 배경과 색이 바뀌어요.
+
+> 이름이 바뀔 때 고칠 곳은 `20261126_캘린더_PRD.md`의 **15장**에 정리돼 있어요.
 
 ---
 
@@ -33,5 +35,5 @@ PC·폰 브라우저에서 열면 됩니다. 일정은 각자의 브라우저에
 - 직접 배포: `npx vercel@65.14.0 deploy --prod`
 
 ## 사용한 자료
-- 글꼴: [Pretendard](https://github.com/orioncactus/pretendard) (SIL OFL 1.1) — 자주 쓰는 2,350자로 줄이고 `MyCalendarSans`로 이름을 바꿔 포함 (`app/assets/fonts/OFL-Pretendard-LICENSE.txt`)
+- 글꼴: [Pretendard](https://github.com/orioncactus/pretendard) (SIL OFL 1.1) — 자주 쓰는 2,350자로 줄이고 `DayglowSans`로 이름을 바꿔 포함 (`app/assets/fonts/OFL-Pretendard-LICENSE.txt`)
 - 날씨: [Open-Meteo](https://open-meteo.com) (비상업 무료)

@@ -1,8 +1,8 @@
 // 날짜 계산이 웹 버전과 같게 동작하는지 확인하는 자동 테스트
 import 'package:flutter_test/flutter_test.dart';
-import 'package:my_calendar/core/calendar_logic.dart';
-import 'package:my_calendar/core/models.dart';
-import 'package:my_calendar/mood/mood_controller.dart';
+import 'package:dayglow/core/calendar_logic.dart';
+import 'package:dayglow/core/models.dart';
+import 'package:dayglow/mood/mood_controller.dart';
 
 void main() {
   test('반복 일정이 맞는 날짜에 나타난다', () {

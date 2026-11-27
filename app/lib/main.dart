@@ -15,29 +15,29 @@ Future<void> main() async {
   final store = CalendarStore();
   final mood = MoodController();
   await Future.wait([store.load(), mood.load()]);
-  runApp(MyCalendarApp(store: store, mood: mood));
+  runApp(DayglowApp(store: store, mood: mood));
 }
 
-class MyCalendarApp extends StatelessWidget {
+class DayglowApp extends StatelessWidget {
   final CalendarStore store;
   final MoodController mood;
-  const MyCalendarApp({super.key, required this.store, required this.mood});
+  const DayglowApp({super.key, required this.store, required this.mood});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'my.calendar',
+      title: 'Dayglow',
       debugShowCheckedModeBanner: false,
       locale: const Locale('en'),
       supportedLocales: const [Locale('en'), Locale('ko')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: ThemeData(
         useMaterial3: true,
-        fontFamily: 'MyCalendarSans', // 앱에 포함한 한글 글꼴 (드문 글자는 기기·웹 기본 글꼴이 대신 표시)
+        fontFamily: 'DayglowSans', // 앱에 포함한 한글 글꼴 (드문 글자는 기기·웹 기본 글꼴이 대신 표시)
         brightness: Brightness.dark,
         colorScheme: const ColorScheme.dark(primary: Color(0xFFA3BDB3), surface: Color(0xFF1C2321)),
         textTheme: _light(ThemeData.dark().textTheme.apply(
-            fontFamily: 'MyCalendarSans', bodyColor: const Color(0xB8FFFFFF), displayColor: const Color(0xF0FFFFFF))),
+            fontFamily: 'DayglowSans', bodyColor: const Color(0xB8FFFFFF), displayColor: const Color(0xF0FFFFFF))),
         splashFactory: NoSplash.splashFactory,
       ),
       // 따로 굵기를 정하지 않은 글자도 모두 '얇게(300)' — 웹 버전과 같은 조용한 느낌
