@@ -19,6 +19,7 @@ class CalEvent {
   String repeat; // none · daily · weekly · monthly
   int? remind; // 몇 분 전에 알릴지 (없으면 null)
   String memo;
+  bool outdoor; // 야외 일정이면 true → 비 예보와 겹치면 알려줘요
 
   CalEvent({
     required this.id,
@@ -31,6 +32,7 @@ class CalEvent {
     this.repeat = 'none',
     this.remind,
     this.memo = '',
+    this.outdoor = false,
   });
 
   factory CalEvent.fromJson(Map<String, dynamic> j) => CalEvent(
@@ -44,6 +46,7 @@ class CalEvent {
         repeat: (j['repeat'] ?? 'none') as String,
         remind: (j['remind'] as num?)?.toInt(),
         memo: (j['memo'] ?? '') as String,
+        outdoor: j['outdoor'] == true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -57,6 +60,7 @@ class CalEvent {
         'repeat': repeat,
         'remind': remind,
         'memo': memo,
+        'outdoor': outdoor,
       };
 
   CalEvent copy() => CalEvent.fromJson(toJson());

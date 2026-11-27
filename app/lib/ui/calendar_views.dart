@@ -6,9 +6,11 @@ import 'package:material_ui/material_ui.dart';
 import '../core/calendar_logic.dart';
 import '../core/models.dart';
 import '../data/calendar_store.dart';
+import '../mood/forecast.dart';
 import 'motion.dart';
 import 'palette.dart';
 import 'strings.dart';
+import 'weather_ui.dart';
 
 /// 달력에서 일어나는 동작을 화면 밖(HomePage)으로 전달
 class CalendarActions {
@@ -21,6 +23,8 @@ class CalendarActions {
   final void Function(CalEvent e) duplicateEvent;
   final void Function(CalEvent e) postponeEvent; // 하루 뒤로 미루기
   final void Function(CalEvent e) deleteEvent;
+  final void Function(CalEvent e, String ds) rainHelp; // 우산 표시를 누르면: 더 좋은 시간 안내
+  final Forecast forecast; // 날씨 예보 (일정 칩 질감·하늘 띠·날씨 보기에 사용)
   const CalendarActions({
     required this.select,
     required this.addAt,
@@ -31,6 +35,8 @@ class CalendarActions {
     required this.duplicateEvent,
     required this.postponeEvent,
     required this.deleteEvent,
+    required this.rainHelp,
+    required this.forecast,
   });
 }
 
@@ -94,34 +100,41 @@ Widget todoText(BuildContext context, String text, {required bool done, required
       child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
 
-/// 일정 위에 마우스를 올리면 나타나는 반투명 알약 버튼 (복제 · 내일로 · 삭제)
-/// 버튼을 늘리거나 줄이려면 eventHoverChips 에서 목록만 고치면 돼요
-List<HoverChipSpec> eventHoverChips(CalEvent e, CalendarActions a) => [
-      HoverChipSpec(Icons.content_copy, 'Duplicate', () => a.duplicateEvent(e)),
-      if (e.repeat == 'none') HoverChipSpec(Icons.east, 'Move to tomorrow', () => a.postponeEvent(e)),
-      HoverChipSpec(Icons.delete_outline, 'Delete', () => a.deleteEvent(e), danger: true),
-    ];
+/// 일정 위에 마우스를 올리면 나타나는 반투명 알약 버튼 목록 (현재는 비어 있어서 칩이 안 보여요)
+/// 다시 쓰고 싶으면 아래 목록에 HoverChipSpec 을 넣으면 돼요. 예:
+///   HoverChipSpec(Icons.content_copy, 'Duplicate', () => a.duplicateEvent(e)),
+///   if (e.repeat == 'none') HoverChipSpec(Icons.east, 'Move to tomorrow', () => a.postponeEvent(e)),
+///   HoverChipSpec(Icons.delete_outline, 'Delete', () => a.deleteEvent(e), danger: true),
+List<HoverChipSpec> eventHoverChips(CalEvent e, CalendarActions a) => [];
 
-Widget eventChip(CalendarStore store, CalEvent e, CalendarActions a) => HoverChips(
+Widget eventChip(CalendarStore store, CalEvent e, CalendarActions a, String ds) {
+  final risk = rainRisk(e, ds, a.forecast);
+  return HoverChips(
       chips: eventHoverChips(e, a),
       barColor: hexColor(store.catOf(e.cat).color),
       child: Pressable(
         child: GestureDetector(
           onTap: () => a.openEvent(e),
           behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
-            child: Row(children: [
-              Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: t70)),
-              ),
-            ]),
-          ),
+          // 날씨 질감이 글자 뒤에 깔림
+          child: Stack(children: [
+            weatherTexture(a.forecast, e, ds, radius: 5),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+              child: Row(children: [
+                Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: t70)),
+                ),
+                if (risk != null) umbrellaBadge(() => a.rainHelp(e, ds), size: 11),
+              ]),
+            ),
+          ]),
         ),
       ),
     );
+}
 
 Widget todoChip(({Todo t, bool over}) x, CalendarActions a, Color accent, Color ink) => Builder(
       builder: (context) => Pressable(
@@ -194,6 +207,7 @@ class _HoverChipsState extends State<HoverChips> {
             ),
           ),
         widget.child,
+        if (widget.chips.isNotEmpty)
         Positioned.fill(
           child: Align(
             alignment: widget.alignment,
@@ -276,6 +290,7 @@ class MonthView extends StatelessWidget {
   final Color ink;
   final bool fillHeight; // 넓은 화면: 남은 높이를 채움 / 폰: 칸 높이 고정
   final bool compact;
+  final bool skyMap; // 날짜 칸을 예상 날씨 색으로 칠하기
 
   const MonthView({
     super.key,
@@ -287,6 +302,7 @@ class MonthView extends StatelessWidget {
     required this.ink,
     required this.fillHeight,
     this.compact = false,
+    this.skyMap = false,
   });
 
   @override
@@ -305,11 +321,13 @@ class MonthView extends StatelessWidget {
       final rest = tds.where((x) => !late.contains(x)).toList();
       final items = <Widget>[
         ...late.map((x) => todoChip(x, actions, accent, ink)),
-        ...store.eventsOn(ds).map((e) => eventChip(store, e, actions)),
+        ...store.eventsOn(ds).map((e) => eventChip(store, e, actions, ds)),
         ...rest.map((x) => todoChip(x, actions, accent, ink)),
       ];
       final other = d.month != cursor.month;
       final isSel = ds == sel;
+      final dayWx = skyMap ? actions.forecast.day(ds) : null; // 날씨 보기: 그날의 예상 날씨
+      final tint = dayWx == null ? null : wxTint(dayWx.theme);
       // 날짜 칸: 마우스를 올리면 은은하게 밝아지고, 누르면 살짝 눌림, 선택 배경은 부드럽게 바뀜
       return Pressable(
         pressedScale: .98,
@@ -322,12 +340,16 @@ class MonthView extends StatelessWidget {
           duration: Motion.of(context, Motion.base),
           curve: Motion.ease,
           decoration: BoxDecoration(
-            color: isSel ? const Color(0x0FFFFFFF) : const Color(0x00FFFFFF),
+            color: Color.alphaBlend(
+              isSel ? const Color(0x14FFFFFF) : const Color(0x00FFFFFF),
+              tint == null ? const Color(0x00FFFFFF) : tint.withAlpha(other ? 26 : 58),
+            ),
             border: const Border(top: BorderSide(color: hairline)),
           ),
           padding: EdgeInsets.fromLTRB(compact ? 4 : 8, 8, compact ? 4 : 8, 4),
           child: ClipRect(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
               Container(
                 padding: const EdgeInsets.only(bottom: 2),
                 margin: const EdgeInsets.only(bottom: 4),
@@ -343,6 +365,20 @@ class MonthView extends StatelessWidget {
                   child: Text(pad2(d.day)),
                 ),
               ),
+              if (dayWx != null) ...[
+                const Spacer(),
+                // 날씨 보기: 아이콘 + 최고 기온 (비 올 확률이 높으면 우산)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: compact
+                      ? Icon(wxIcon(dayWx.theme), size: 11, color: t70)
+                      : Tooltip(
+                          message: '${weatherLabelEn(dayWx.theme)} · ${dayWx.tMax}° / ${dayWx.tMin}° · rain ${dayWx.rain}%',
+                          child: dayWxMini(dayWx),
+                        ),
+                ),
+              ],
+              ]),
               if (compact)
                 Wrap(spacing: 3, children: [
                   for (final e in store.eventsOn(ds).take(3))
@@ -452,7 +488,13 @@ class _TimeGridViewState extends State<TimeGridView> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(weekdayShortEn[weekdayIndex(d)], style: const TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+                    Row(children: [
+                      Text(weekdayShortEn[weekdayIndex(d)], style: const TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+                      if (a.forecast.day(ymd(d)) != null) ...[
+                        const Spacer(),
+                        dayWxMini(a.forecast.day(ymd(d))!, full: widget.days.length == 1),
+                      ],
+                    ]),
                     const SizedBox(height: 4),
                     // 선택한 날의 숫자 색이 부드럽게 바뀜
                     AnimatedDefaultTextStyle(
@@ -485,7 +527,7 @@ class _TimeGridViewState extends State<TimeGridView> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    for (final e in s.eventsOn(ymd(d)).where((e) => e.allDay)) eventChip(s, e, a),
+                    for (final e in s.eventsOn(ymd(d)).where((e) => e.allDay)) eventChip(s, e, a, ymd(d)),
                     for (final x in s.todosOn(ymd(d))) todoChip(x, a, widget.accent, widget.ink),
                   ]),
                 ),
@@ -529,12 +571,14 @@ class _TimeGridViewState extends State<TimeGridView> {
                           for (var i = 0; i < 24; i++)
                             Container(height: hh, decoration: const BoxDecoration(border: Border(top: BorderSide(color: hairline)))),
                         ]),
+                        // 하늘 띠: 새벽 → 낮(날씨 색) → 노을 → 밤
+                        Positioned(left: 1, top: 0, bottom: 0, child: SkyStrip(day: a.forecast.day(ds), forecast: a.forecast, ds: ds)),
                         for (final p in layoutDay(s.eventsOn(ds)))
                           Positioned(
                             top: p.startMin / 60 * hh,
                             height: ((p.endMin - p.startMin) / 60 * hh - 2).clamp(20, 24 * hh),
-                            left: p.col * width / p.cols + 2,
-                            width: width / p.cols - 4,
+                            left: p.col * width / p.cols + 6,
+                            width: width / p.cols - 8,
                             // 일정 블록: 처음 보일 때 위에서부터 차례로 떠오름 + 누르면 살짝 눌림
                             child: StaggerIn(
                               index: p.startMin ~/ 60,
@@ -549,16 +593,24 @@ class _TimeGridViewState extends State<TimeGridView> {
                                   child: GestureDetector(
                                     onTap: () => a.openEvent(p.e),
                                     child: Container(
-                                      padding: const EdgeInsets.fromLTRB(9, 4, 6, 2),
+                                      clipBehavior: Clip.antiAlias,
                                       decoration: BoxDecoration(
                                         color: hexColor(s.catOf(p.e.cat).color).withAlpha(38),
                                         borderRadius: BorderRadius.circular(7),
                                       ),
-                                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                        Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
-                                        Flexible(
-                                          child: Text(p.e.title, overflow: TextOverflow.fade, style: const TextStyle(fontSize: 11.5, color: t100)),
+                                      child: Stack(children: [
+                                        weatherTexture(a.forecast, p.e, ds), // 시작 시각의 날씨 질감
+                                        Padding(
+                                          padding: const EdgeInsets.fromLTRB(9, 4, 6, 2),
+                                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                            Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
+                                            Flexible(
+                                              child: Text(p.e.title, overflow: TextOverflow.fade, style: const TextStyle(fontSize: 11.5, color: t100)),
+                                            ),
+                                          ]),
                                         ),
+                                        if (rainRisk(p.e, ds, a.forecast) != null)
+                                          Positioned(top: 2, right: 3, child: umbrellaBadge(() => a.rainHelp(p.e, ds))),
                                       ]),
                                     ),
                                   ),

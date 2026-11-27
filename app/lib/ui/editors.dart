@@ -4,10 +4,12 @@ import 'package:material_ui/material_ui.dart';
 import '../core/calendar_logic.dart';
 import '../core/models.dart';
 import '../data/calendar_store.dart';
+import '../mood/forecast.dart';
 import '../mood/mood_controller.dart';
 import 'motion.dart';
 import 'palette.dart';
 import 'strings.dart';
+import 'weather_ui.dart';
 
 const repeatOptions = {'none': 'Never', 'daily': 'Daily', 'weekly': 'Weekly', 'monthly': 'Monthly'};
 const remindOptions = <int?, String>{null: 'None', 10: '10 min before', 60: '1 hour before', 1440: '1 day before'};
@@ -129,6 +131,7 @@ Future<String?> showEditor(
   String? date,
   int? hour,
   bool fromCell = false,
+  Forecast? forecast,
 }) =>
     // 입력 창: 살짝 작게 시작해서 커지며 떠오름
     showGeneralDialog<String>(
@@ -137,7 +140,7 @@ Future<String?> showEditor(
       barrierLabel: 'Close',
       barrierColor: const Color(0x8C080B0A),
       transitionDuration: Motion.of(context, const Duration(milliseconds: 160)), // 일정 창이 열리는 속도
-      pageBuilder: (_, _, _) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell),
+      pageBuilder: (_, _, _) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: forecast),
       transitionBuilder: (_, anim, _, child) {
         final a = CurvedAnimation(parent: anim, curve: Motion.ease, reverseCurve: Curves.easeIn);
         return FadeTransition(
@@ -155,7 +158,8 @@ class _EditorDialog extends StatefulWidget {
   final String? date;
   final int? hour;
   final bool fromCell;
-  const _EditorDialog({required this.store, required this.pal, this.event, this.todo, this.date, this.hour, required this.fromCell});
+  final Forecast? forecast;
+  const _EditorDialog({required this.store, required this.pal, this.event, this.todo, this.date, this.hour, required this.fromCell, this.forecast});
   @override
   State<_EditorDialog> createState() => _EditorDialogState();
 }
@@ -175,6 +179,7 @@ class _EditorDialogState extends State<_EditorDialog> {
   late String cat = widget.event?.cat ?? widget.store.cats.first.id;
   late String repeat = widget.event?.repeat ?? 'none';
   late int? remind = widget.event?.remind;
+  late bool outdoor = widget.event?.outdoor ?? false;
   bool forceSave = false;
   List<CalEvent> warn = [];
 
@@ -260,6 +265,7 @@ class _EditorDialogState extends State<_EditorDialog> {
       repeat: repeat,
       remind: remind,
       memo: memoCtl.text.trim(),
+      outdoor: outdoor,
     );
     final ov = s.overlaps(cand);
     if (ov.isNotEmpty && !forceSave) {
@@ -297,6 +303,38 @@ class _EditorDialogState extends State<_EditorDialog> {
       widget.store.deleteEvent(widget.event!.id);
       Navigator.pop(context, 'Event deleted');
     }
+  }
+
+  /// 선택한 날짜·시작 시각의 예보 + 옷차림 한 줄 (+ 야외 일정이면 비 경고)
+  Widget _weatherNote() {
+    final f = widget.forecast;
+    final d = f?.day(date);
+    if (f == null || d == null) return const SizedBox.shrink();
+    final h = allDay ? null : f.hour(date, (toMin(start) ~/ 60).clamp(0, 23));
+    final theme = h?.theme ?? d.theme;
+    final tryEv = CalEvent(id: '', title: '', date: date, allDay: allDay, start: start, end: end, outdoor: outdoor);
+    final risk = rainRisk(tryEv, date, f);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      margin: const EdgeInsets.only(bottom: 18),
+      decoration: const BoxDecoration(border: Border.symmetric(horizontal: BorderSide(color: hairline))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(wxIcon(theme), size: 14, color: t70),
+          const SizedBox(width: 8),
+          Text('${weatherLabelEn(theme)} · ${h?.temp ?? d.tMax}° · rain ${h?.rain ?? d.rain}%  (${f.place})',
+              style: const TextStyle(fontSize: 12, color: t70)),
+        ]),
+        const SizedBox(height: 6),
+        Text('Outfit · ${h != null ? hourOutfit(d, h) : dayOutfit(d)}', style: const TextStyle(fontSize: 12, height: 1.5, color: t50)),
+        if (risk != null) ...[
+          const SizedBox(height: 6),
+          Text('비 예보가 있어요 (${pad2(risk.fromHour)}:00–${pad2(risk.toHour)}:00, ${risk.maxRain}%). 저장한 뒤 우산 표시를 누르면 더 좋은 시간을 보여줘요.',
+              style: const TextStyle(fontSize: 12, height: 1.5, color: rainBlue)),
+        ],
+      ]),
+    );
   }
 
   Widget _two(Widget a, Widget b) => Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -372,6 +410,7 @@ class _EditorDialogState extends State<_EditorDialog> {
                     UnderlineSelect(text: end, onTap: () => _pickTime(end, (v) => end = v)),
                   ),
                 ),
+              _weatherNote(),
               _field(
                 'CATEGORY · REPEAT',
                 _two(
@@ -381,6 +420,15 @@ class _EditorDialogState extends State<_EditorDialog> {
               ),
               if (cat == '__new')
                 _field('NEW CATEGORY', TextField(controller: newCatCtl, autofocus: true, style: textStyle, decoration: underlineDecoration(pal.accent))),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(children: [
+                  Checkbox(value: outdoor, activeColor: pal.accent, checkColor: pal.accentInk, onChanged: (v) => setState(() => outdoor = v ?? false)),
+                  const Text('Outdoor', style: TextStyle(fontSize: 13, color: t70)),
+                  const SizedBox(width: 8),
+                  const Flexible(child: Text('비가 올 것 같으면 알려줘요', style: TextStyle(fontSize: 11.5, color: t30))),
+                ]),
+              ),
               _field('REMINDER  ·  앱 알림은 다음 단계에서 연결', _dropdown<int?>(remind, remindOptions, (v) => setState(() => remind = v))),
               _field('MEMO', TextField(controller: memoCtl, maxLines: 2, style: textStyle, decoration: underlineDecoration(pal.accent))),
               if (warn.isNotEmpty)

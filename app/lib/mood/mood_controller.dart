@@ -9,12 +9,17 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/calendar_logic.dart';
+import 'forecast.dart';
+
+export 'forecast.dart' show themeOf;
 
 // ===== 바꿔서 쓸 수 있는 기준값 =====
 const weatherRefreshMinutes = 30; // 날씨를 다시 확인하는 간격
 const heatC = 33, coldC = -10; // 폭염·한파 기준 기온
 const windStrongKmh = 40; // 강풍 기준
 const busyEvents = 5, busyFreeMinutes = 180; // 바쁜 날: 일정 5개 이상 또는 빈 시간 3시간 미만
+// 위치를 못 받을 때 예보 기능에 쓰는 대체 도시 (바꾸려면 아래 3개만 고치세요)
+const fallbackPlace = 'Seoul', fallbackLat = '37.57', fallbackLon = '126.98';
 
 const weatherLabel = {
   'clear': 'Clear',
@@ -27,16 +32,6 @@ const weatherLabel = {
 };
 const todLabel = {'dawn': 'Dawn', 'day': 'Day', 'dusk': 'Dusk', 'night': 'Night'};
 const tempLabel = {'normal': 'Mild', 'heat': 'Heat', 'cold': 'Cold'};
-
-/// 세계기상기구(WMO) 날씨 코드 → 테마
-String themeOf(int code, bool isDay) {
-  if ([95, 96, 99].contains(code)) return 'storm';
-  if ([71, 73, 75, 77, 85, 86].contains(code)) return 'snow';
-  if ((code >= 51 && code <= 67) || [80, 81, 82].contains(code)) return 'rain';
-  if ([45, 48].contains(code)) return 'fog';
-  if ([2, 3].contains(code)) return 'cloudy';
-  return isDay ? 'clear' : 'night';
-}
 
 /// 확인한 날씨 (좌표는 저장하지 않음)
 class WeatherInfo {
@@ -64,6 +59,7 @@ class WeatherInfo {
 
 class MoodController extends ChangeNotifier {
   WeatherInfo? wx;
+  final Forecast forecast = Forecast(); // 16일치 예보 (화면들이 같은 객체를 함께 봐요)
   String weatherMode = 'auto'; // auto 또는 직접 고른 날씨
   String todMode = 'auto';
   String tempMode = 'auto';
@@ -79,6 +75,8 @@ class MoodController extends ChangeNotifier {
     try {
       final w = p.getString('cal_weather');
       if (w != null) wx = WeatherInfo.fromJson(jsonDecode(w) as Map<String, dynamic>);
+      final f = p.getString('cal_forecast');
+      if (f != null) forecast.setFrom(Forecast.fromJson(jsonDecode(f) as Map<String, dynamic>));
       final m = p.getString('cal_mood');
       if (m != null) {
         final j = jsonDecode(m) as Map<String, dynamic>;
@@ -157,9 +155,12 @@ class MoodController extends ChangeNotifier {
   }
 
   // ===== 날씨 확인: 위치(앱 사용 중에만) → Open-Meteo(무료·키 없음) =====
+  // 현재 날씨와 16일 예보를 한 번에 받아요. 위치를 못 받으면 대체 도시(서울) 예보만 받아요.
   Future<void> refresh({bool force = false}) async {
     final w = wx;
-    if (!force && w != null && DateTime.now().millisecondsSinceEpoch - w.at < weatherRefreshMinutes * 60000) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final wxFresh = w == null || nowMs - w.at < weatherRefreshMinutes * 60000;
+    if (!force && forecast.fresh(weatherRefreshMinutes) && wxFresh) {
       notifyListeners();
       return;
     }
@@ -168,45 +169,71 @@ class MoodController extends ChangeNotifier {
     status = '위치를 확인하는 중…';
     notifyListeners();
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        status = '기기의 위치 서비스가 꺼져 있어 기본 테마를 써요.';
-        return;
-      }
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-        status = '위치 권한이 꺼져 있어 기본 테마를 써요.';
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
-      ).timeout(const Duration(seconds: 15));
-      // 약 1km 단위로 뭉개서 보냄. 좌표는 저장하지 않음
-      final lat = pos.latitude.toStringAsFixed(2), lon = pos.longitude.toStringAsFixed(2);
+      final loc = await _locate();
+      final here = loc != null;
+      final lat = loc?.lat ?? fallbackLat, lon = loc?.lon ?? fallbackLon;
       final res = await http
           .get(Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon'
-              '&current=temperature_2m,weather_code,is_day,wind_speed_10m&daily=sunrise,sunset&timezone=auto&forecast_days=1'))
-          .timeout(const Duration(seconds: 10));
+              '&current=temperature_2m,weather_code,is_day,wind_speed_10m'
+              '&hourly=temperature_2m,weather_code,precipitation_probability'
+              '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset'
+              '&timezone=auto&past_days=1&forecast_days=16'))
+          .timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) throw Exception('weather ${res.statusCode}');
       final j = jsonDecode(res.body) as Map<String, dynamic>;
-      final c = j['current'] as Map<String, dynamic>;
-      final d = j['daily'] as Map<String, dynamic>?;
-      wx = WeatherInfo(
-        theme: themeOf((c['weather_code'] as num).toInt(), c['is_day'] == 1),
-        temp: (c['temperature_2m'] as num).round(),
-        wind: ((c['wind_speed_10m'] ?? 0) as num).round(),
-        sunrise: (d?['sunrise'] as List?)?.first as String?,
-        sunset: (d?['sunset'] as List?)?.first as String?,
-        at: DateTime.now().millisecondsSinceEpoch,
-      );
-      status = '';
+      final now = DateTime.now().millisecondsSinceEpoch;
+      forecast.setFrom(Forecast.parse(j, place: here ? 'Here' : fallbackPlace, at: now));
+      _prefs?.setString('cal_forecast', jsonEncode(forecast.toJson()));
+      if (here) {
+        final c = j['current'] as Map<String, dynamic>;
+        final d = j['daily'] as Map<String, dynamic>?;
+        final today = (d?['time'] as List?)?.indexOf(todayStr()) ?? -1;
+        final i = today < 0 ? 0 : today;
+        wx = WeatherInfo(
+          theme: themeOf((c['weather_code'] as num).toInt(), c['is_day'] == 1),
+          temp: (c['temperature_2m'] as num).round(),
+          wind: ((c['wind_speed_10m'] ?? 0) as num).round(),
+          sunrise: (d?['sunrise'] as List?)?[i] as String?,
+          sunset: (d?['sunset'] as List?)?[i] as String?,
+          at: now,
+        );
+        status = '';
+      } else {
+        status = '$status 예보 기능은 $fallbackPlace 기준으로 보여줘요.';
+      }
     } on TimeoutException {
-      status = '위치·날씨 확인이 오래 걸려 기본 테마를 써요.';
+      status = '날씨 확인이 오래 걸려 기본 테마를 써요.';
     } catch (_) {
       status = '날씨를 가져오지 못했어요. 인터넷 연결을 확인해 주세요.';
     } finally {
       _fetching = false;
       _persist();
+    }
+  }
+
+  /// 대략적인 위치(약 1km 단위로 뭉갬, 저장하지 않음). 못 받으면 이유를 status에 적고 null
+  Future<({String lat, String lon})?> _locate() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        status = '기기의 위치 서비스가 꺼져 있어 기본 테마를 써요.';
+        return null;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+        status = '위치 권한이 꺼져 있어 기본 테마를 써요.';
+        return null;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low),
+      ).timeout(const Duration(seconds: 15));
+      return (lat: pos.latitude.toStringAsFixed(2), lon: pos.longitude.toStringAsFixed(2));
+    } on TimeoutException {
+      status = '위치 확인이 오래 걸려 기본 테마를 써요.';
+      return null;
+    } catch (_) {
+      status = '위치를 확인하지 못해 기본 테마를 써요.';
+      return null;
     }
   }
 

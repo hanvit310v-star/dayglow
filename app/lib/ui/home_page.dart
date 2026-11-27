@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/calendar_logic.dart';
 import '../core/models.dart';
 import '../data/calendar_store.dart';
+import '../mood/forecast.dart';
 import '../mood/mood_controller.dart';
 import 'atmosphere.dart';
 import 'calendar_views.dart';
@@ -16,6 +17,7 @@ import 'motion.dart';
 import 'palette.dart';
 import 'strings.dart';
 import 'sync_dialog.dart';
+import 'weather_ui.dart';
 
 class HomePage extends StatefulWidget {
   final CalendarStore store;
@@ -31,6 +33,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String sel = todayStr();
   String query = '';
   bool todoOpen = false;
+  bool skyMap = false; // 월간 보기를 날씨 색으로 칠하기
   final searchCtl = TextEditingController();
   final todoCtl = TextEditingController();
   Timer? _minute;
@@ -89,11 +92,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> openEditor({CalEvent? event, Todo? todo, String? date, int? hour, bool fromCell = false}) async {
     final msg = await showEditor(context,
-        store: store, pal: paletteOf(mood.theme), event: event, todo: todo, date: date, hour: hour, fromCell: fromCell);
+        store: store, pal: paletteOf(mood.theme), event: event, todo: todo, date: date, hour: hour, fromCell: fromCell, forecast: mood.forecast);
     if (msg != null && mounted) {
       if (event == null && todo == null && date != null) sel = date;
       toast(msg);
     }
+  }
+
+  /// 월간 날씨 보기 켜고 끄기 (예보가 아직 없으면 먼저 받아 와요)
+  void toggleSky() {
+    if (!skyMap && mood.forecast.isEmpty) {
+      toast('예보를 불러오는 중이에요. 잠시 뒤에 다시 눌러 주세요.');
+      mood.refresh(force: true);
+      return;
+    }
+    setState(() => skyMap = !skyMap);
+  }
+
+  /// 우산 표시를 누르면: 비 안 오는 더 좋은 시간 후보를 보여주고, 고르면 일정을 옮김 (되돌리기 가능)
+  Future<void> rainHelp(CalEvent e, String ds) async {
+    final risk = rainRisk(e, ds, mood.forecast);
+    if (risk == null) return;
+    final slots = e.repeat == 'none' ? betterSlots(e, ds, mood.forecast, (d) => store.eventsOn(d, onlyVisible: false)) : <Slot>[];
+    final pick = await showRainHelp(context, pal: paletteOf(mood.theme), event: e, ds: ds, risk: risk, slots: slots);
+    if (pick == null || !mounted) return;
+    final before = e.copy();
+    store.upsertEvent(e.copy()
+      ..date = pick.ds
+      ..start = pick.startText
+      ..end = pick.endText);
+    setState(() {
+      selectDay(pick.ds);
+      final d = parseYmd(pick.ds);
+      if (view == 'month') {
+        if (d.month != cursor.month || d.year != cursor.year) cursor = DateTime(d.year, d.month, 1);
+      } else {
+        cursor = d;
+      }
+    });
+    toast('Moved to ${enDayLabel(pick.ds)} ${pick.startText}', undo: () => store.upsertEvent(before));
+  }
+
+  /// 산책하기 좋은 시간에 '야외' 일정으로 추가
+  void addWalk(Slot w) {
+    final ev = CalEvent(
+      id: newId(),
+      title: 'Walk',
+      date: w.ds,
+      start: w.startText,
+      end: w.endText,
+      cat: store.cats.any((c) => c.id == 'personal') ? 'personal' : store.cats.first.id,
+      outdoor: true,
+    );
+    store.upsertEvent(ev);
+    toast('Walk added · ${w.startText}', undo: () => store.deleteEvent(ev.id));
   }
 
   void openMood() => showMoodPanel(context, mood: mood, extraStatus: moodExtra, wide: MediaQuery.sizeOf(context).width >= 1080);
@@ -153,6 +205,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       store.deleteEvent(e.id);
       toast('Event deleted', undo: () => store.upsertEvent(backup));
     },
+    rainHelp: (e, ds) => rainHelp(e, ds),
+    forecast: mood.forecast,
     toggleTodo: store.toggleTodo,
     showDay: (ds) => setState(() {
       selectDay(ds);
@@ -261,6 +315,13 @@ class _LeftPane extends StatelessWidget {
     ]);
     final offCats = s.store.cats.where((c) => !c.on).length;
     final tools = Row(mainAxisSize: MainAxisSize.min, children: [
+      if (s.view == 'month')
+        Tooltip(
+          message: 'Color days by forecast',
+          child: Pressable(
+            child: TextButton(style: textButton(color: s.skyMap ? pal.accent : t50), onPressed: s.toggleSky, child: const Text('Sky', style: TextStyle(fontSize: 13))),
+          ),
+        ),
       Pressable(
         child: TextButton(
           style: textButton(),
@@ -302,6 +363,7 @@ class _LeftPane extends StatelessWidget {
         ink: pal.accentInk,
         fillHeight: wide,
         compact: compact,
+        skyMap: s.skyMap,
       );
     } else {
       final days = s.view == 'week'
@@ -328,7 +390,13 @@ class _LeftPane extends StatelessWidget {
         top,
         Padding(
           padding: EdgeInsets.only(top: wide ? 30 : 22, bottom: 14),
-          child: RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
+          child: Row(children: [
+            RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
+            if (s.view == 'month' && s.skyMap) ...[
+              const Spacer(),
+              _SkyLegend(place: s.mood.forecast.place, compact: compact),
+            ],
+          ]),
         ),
         if (wide) Expanded(child: switcher) else switcher,
         SizedBox(height: wide ? 30 : 24),
@@ -336,6 +404,25 @@ class _LeftPane extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// 월간 날씨 보기의 색 안내: 색 점 + 이름 (어느 지역 예보인지도)
+class _SkyLegend extends StatelessWidget {
+  final String place;
+  final bool compact;
+  const _SkyLegend({required this.place, required this.compact});
+
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        if (!compact)
+          for (final t in const ['clear', 'cloudy', 'rain', 'snow', 'storm']) ...[
+            Container(width: 6, height: 6, decoration: BoxDecoration(color: wxTint(t), shape: BoxShape.circle)),
+            const SizedBox(width: 5),
+            Text(weatherLabelEn(t), style: const TextStyle(fontSize: 10.5, color: t50)),
+            const SizedBox(width: 12),
+          ],
+        Text('Forecast · ${place.isEmpty ? '—' : place}', style: const TextStyle(fontSize: 10.5, color: t30)),
+      ]);
 }
 
 /// 왼쪽 아래 구석: 선택한 날을 크게 (주인공 하나만 크게, 나머지는 작게)
@@ -574,6 +661,9 @@ class _RightPanel extends StatelessWidget {
     final tds = st.todosOn(ds);
     final dayTodos = st.todos.where((t) => t.due == ds).toList();
     final undated = st.undatedTodos;
+    final fc = s.mood.forecast;
+    final dw = fc.day(ds);
+    final walk = walkWindow(ds, fc, (d) => st.eventsOn(d, onlyVisible: false)); // 산책하기 좋은 시간
     final open = undated.where((t) => !t.done).toList();
     final done = undated.where((t) => t.done).toList();
     Widget divider() => const Divider(color: hairline, height: 1);
@@ -603,7 +693,9 @@ class _RightPanel extends StatelessWidget {
               key: ValueKey('$ds-e${e.id}'),
               index: n++,
               child: _item(
-                lead: Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(st.catOf(e.cat).color), shape: BoxShape.circle)),
+                lead: rainRisk(e, ds, fc) != null
+                    ? umbrellaBadge(() => s.rainHelp(e, ds))
+                    : Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(st.catOf(e.cat).color), shape: BoxShape.circle)),
                 text: e.title,
                 value: e.allDay ? 'All day' : e.start,
                 onTap: () => s.openEditor(event: e),
@@ -622,6 +714,13 @@ class _RightPanel extends StatelessWidget {
                 onTap: () => s.openEditor(todo: x.t),
               ),
             ),
+          // 날씨 좋고 비어 있는 시간 제안
+          if (walk != null)
+            StaggerIn(
+              key: ValueKey('walk$ds${walk.startMin}'),
+              index: n++,
+              child: Padding(padding: const EdgeInsets.only(top: 18), child: WalkCard(slot: walk, pal: pal, onAdd: () => s.addWalk(walk))),
+            ),
         ]),
       ),
       divider(),
@@ -634,6 +733,17 @@ class _RightPanel extends StatelessWidget {
           kv('Tasks done', '${dayTodos.where((t) => t.done).length} / ${dayTodos.length}'),
           kv('Free time  ${activeHours.start}–${activeHours.end}', hoursMinutes(st.freeMinutes(ds))),
           kv('Overdue', '${st.overdueCount}', warn: st.overdueCount > 0),
+          if (dw != null) ...[
+            kv('Weather', '${weatherLabelEn(dw.theme)}  ${dw.tMax}° / ${dw.tMin}°'),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Outfit', style: TextStyle(fontSize: 13, color: t50)),
+                const SizedBox(width: 24),
+                Expanded(child: Text(dayOutfit(dw), textAlign: TextAlign.right, style: const TextStyle(fontSize: 13, height: 1.45, color: t100))),
+              ]),
+            ),
+          ],
         ]),
       ),
       // 마감일 없는 할 일 (접이식)
