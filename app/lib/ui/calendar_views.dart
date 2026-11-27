@@ -1,12 +1,15 @@
 // 월 보기 · 주/일 보기
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:material_ui/material_ui.dart';
 
 import '../core/calendar_logic.dart';
 import '../core/models.dart';
 import '../data/calendar_store.dart';
+import 'motion.dart';
 import 'palette.dart';
+import 'strings.dart';
 
 /// 달력에서 일어나는 동작을 화면 밖(HomePage)으로 전달
 class CalendarActions {
@@ -16,6 +19,9 @@ class CalendarActions {
   final void Function(Todo t) openTodo;
   final void Function(String id) toggleTodo;
   final void Function(String ds) showDay;
+  final void Function(CalEvent e) duplicateEvent;
+  final void Function(CalEvent e) postponeEvent; // 하루 뒤로 미루기
+  final void Function(CalEvent e) deleteEvent;
   const CalendarActions({
     required this.select,
     required this.addAt,
@@ -23,6 +29,9 @@ class CalendarActions {
     required this.openTodo,
     required this.toggleTodo,
     required this.showDay,
+    required this.duplicateEvent,
+    required this.postponeEvent,
+    required this.deleteEvent,
   });
 }
 
@@ -35,65 +44,209 @@ class TodoCircle extends StatelessWidget {
   final VoidCallback onTap;
   const TodoCircle({super.key, required this.done, required this.onTap, required this.accent, required this.ink, this.size = 14});
 
+  // 체크하면 동그라미가 톡 튀며 채워지고, 체크 표시가 커지며 나타남
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: Container(
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: done ? accent : null,
-              border: Border.all(color: done ? accent : const Color(0x59FFFFFF)),
+  Widget build(BuildContext context) => Pressable(
+        pressedScale: .85,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: PopOnChange(
+              value: done,
+              child: AnimatedContainer(
+                duration: Motion.of(context, Motion.base),
+                curve: Motion.ease,
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: done ? accent : accent.withAlpha(0),
+                  border: Border.all(color: done ? accent : const Color(0x59FFFFFF)),
+                ),
+                child: AnimatedScale(
+                  scale: done ? 1 : 0,
+                  duration: Motion.of(context, Motion.base),
+                  curve: Curves.easeOutBack,
+                  child: Icon(Icons.check, size: size * 0.7, color: ink),
+                ),
+              ),
             ),
-            child: done ? Icon(Icons.check, size: size * 0.7, color: ink) : null,
           ),
         ),
       );
 }
 
-Widget eventChip(CalendarStore store, CalEvent e, VoidCallback onTap) => GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 1.5),
-        child: Row(children: [
-          Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: t70)),
+/// 할 일 글자: 완료하면 흐려지며 줄이 그어짐 (색·줄 바뀜이 부드럽게)
+Widget todoText(BuildContext context, String text, {required bool done, required bool over, double size = 13, Color normal = t50}) =>
+    AnimatedDefaultTextStyle(
+      duration: Motion.of(context, Motion.base),
+      curve: Motion.ease,
+      style: TextStyle(
+        fontFamily: 'MyCalendarSans',
+        fontWeight: FontWeight.w300,
+        fontSize: size,
+        color: over ? softRed : (done ? t30 : normal),
+        decoration: done ? TextDecoration.lineThrough : TextDecoration.none,
+        decorationColor: done ? t30 : const Color(0x00FFFFFF),
+      ),
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+
+/// 일정 위에 마우스를 올리면 나타나는 반투명 알약 버튼 (복제 · 내일로 · 삭제)
+/// 버튼을 늘리거나 줄이려면 eventHoverChips 에서 목록만 고치면 돼요
+List<HoverChipSpec> eventHoverChips(CalEvent e, CalendarActions a) => [
+      HoverChipSpec(Icons.content_copy, 'Duplicate', () => a.duplicateEvent(e)),
+      if (e.repeat == 'none') HoverChipSpec(Icons.east, 'Move to tomorrow', () => a.postponeEvent(e)),
+      HoverChipSpec(Icons.delete_outline, 'Delete', () => a.deleteEvent(e), danger: true),
+    ];
+
+Widget eventChip(CalendarStore store, CalEvent e, CalendarActions a) => HoverChips(
+      chips: eventHoverChips(e, a),
+      child: Pressable(
+        child: GestureDetector(
+          onTap: () => a.openEvent(e),
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1.5),
+            child: Row(children: [
+              Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(store.catOf(e.cat).color), shape: BoxShape.circle)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: t70)),
+              ),
+            ]),
           ),
-        ]),
+        ),
       ),
     );
 
-Widget todoChip(({Todo t, bool over}) x, CalendarActions a, Color accent, Color ink) => GestureDetector(
-      onTap: () => a.openTodo(x.t),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 1),
-        child: Row(children: [
-          TodoCircle(done: x.t.done, size: 10, accent: accent, ink: ink, onTap: () => a.toggleTodo(x.t.id)),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              x.t.text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: x.over ? softRed : (x.t.done ? t30 : t70),
-                decoration: x.t.done ? TextDecoration.lineThrough : null,
+Widget todoChip(({Todo t, bool over}) x, CalendarActions a, Color accent, Color ink) => Builder(
+      builder: (context) => Pressable(
+        child: GestureDetector(
+          onTap: () => a.openTodo(x.t),
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Row(children: [
+              TodoCircle(done: x.t.done, size: 10, accent: accent, ink: ink, onTap: () => a.toggleTodo(x.t.id)),
+              const SizedBox(width: 4),
+              Expanded(child: todoText(context, x.t.text, done: x.t.done, over: x.over, size: 11.5, normal: t70)),
+            ]),
+          ),
+        ),
+      ),
+    );
+
+/// 호버 칩 하나의 정보: 아이콘 · 설명(마우스를 올리면 뜸) · 누르면 할 일
+class HoverChipSpec {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+  const HoverChipSpec(this.icon, this.label, this.onTap, {this.danger = false});
+}
+
+/// 마우스를 올리면 오른쪽에 반투명 알약 버튼들이 부드럽게 나타남 (터치 화면에서는 나타나지 않음)
+class HoverChips extends StatefulWidget {
+  final Widget child;
+  final List<HoverChipSpec> chips;
+  final Alignment alignment; // centerRight: 한 줄 일정 · topRight: 큰 블록
+  const HoverChips({super.key, required this.child, required this.chips, this.alignment = Alignment.centerRight});
+  @override
+  State<HoverChips> createState() => _HoverChipsState();
+}
+
+class _HoverChipsState extends State<HoverChips> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Stack(clipBehavior: Clip.none, children: [
+        widget.child,
+        Positioned.fill(
+          child: Align(
+            alignment: widget.alignment,
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: IgnorePointer(
+                ignoring: !_hover,
+                child: AnimatedOpacity(
+                  opacity: _hover ? 1 : 0,
+                  duration: Motion.of(context, Motion.fast),
+                  curve: Motion.ease,
+                  child: AnimatedSlide(
+                    offset: _hover ? Offset.zero : const Offset(.15, 0),
+                    duration: Motion.of(context, Motion.base),
+                    curve: Motion.ease,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      for (final c in widget.chips) _HoverChip(c),
+                    ]),
+                  ),
+                ),
               ),
             ),
           ),
-        ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _HoverChip extends StatefulWidget {
+  final HoverChipSpec spec;
+  const _HoverChip(this.spec);
+  @override
+  State<_HoverChip> createState() => _HoverChipState();
+}
+
+class _HoverChipState extends State<_HoverChip> {
+  bool _on = false;
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.spec;
+    final fg = c.danger ? softRed : t100;
+    return Padding(
+      padding: const EdgeInsets.only(left: 3),
+      child: Tooltip(
+        message: c.label,
+        waitDuration: const Duration(milliseconds: 400),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _on = true),
+          onExit: (_) => setState(() => _on = false),
+          child: GestureDetector(
+            onTap: c.onTap,
+            behavior: HitTestBehavior.opaque,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                child: AnimatedContainer(
+                  duration: Motion.of(context, Motion.fast),
+                  width: 22,
+                  height: 18,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _on ? const Color(0x38FFFFFF) : const Color(0x1FFFFFFF),
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(color: const Color(0x29FFFFFF)),
+                  ),
+                  child: Icon(c.icon, size: 11.5, color: fg),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
+  }
+}
 
 // ===== 월 보기 =====
 class MonthView extends StatelessWidget {
@@ -134,19 +287,24 @@ class MonthView extends StatelessWidget {
       final rest = tds.where((x) => !late.contains(x)).toList();
       final items = <Widget>[
         ...late.map((x) => todoChip(x, actions, accent, ink)),
-        ...store.eventsOn(ds).map((e) => eventChip(store, e, () => actions.openEvent(e))),
+        ...store.eventsOn(ds).map((e) => eventChip(store, e, actions)),
         ...rest.map((x) => todoChip(x, actions, accent, ink)),
       ];
       final other = d.month != cursor.month;
       final isSel = ds == sel;
-      return GestureDetector(
-        onTap: () => actions.select(ds),
-        onDoubleTap: () => actions.addAt(ds),
+      // 날짜 칸: 마우스를 올리면 은은하게 밝아지고, 누르면 살짝 눌림, 선택 배경은 부드럽게 바뀜
+      return Pressable(
+        pressedScale: .98,
+        hoverGlow: true,
+        child: GestureDetector(
+        // 한 번 클릭 = 그 날짜로 새 일정 만들기 (더블클릭 대기 없이 바로 반응)
+        onTap: () => actions.addAt(ds),
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: Motion.of(context, Motion.base),
+          curve: Motion.ease,
           decoration: BoxDecoration(
-            color: isSel ? const Color(0x0FFFFFFF) : null,
+            color: isSel ? const Color(0x0FFFFFFF) : const Color(0x00FFFFFF),
             border: const Border(top: BorderSide(color: hairline)),
           ),
           padding: EdgeInsets.fromLTRB(compact ? 4 : 8, 8, compact ? 4 : 8, 4),
@@ -156,13 +314,15 @@ class MonthView extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 2),
                 margin: const EdgeInsets.only(bottom: 4),
                 decoration: ds == today ? BoxDecoration(border: Border(bottom: BorderSide(color: accent))) : null,
-                child: Text(
-                  pad2(d.day),
+                child: AnimatedDefaultTextStyle(
+                  duration: Motion.of(context, Motion.base),
                   style: TextStyle(
+                    fontFamily: 'MyCalendarSans',
                     fontSize: 13,
                     color: ds == today || isSel ? t100 : (other ? t30.withAlpha(46) : t50),
                     fontWeight: ds == today ? FontWeight.w400 : FontWeight.w300,
                   ),
+                  child: Text(pad2(d.day)),
                 ),
               ),
               if (compact)
@@ -182,7 +342,7 @@ class MonthView extends StatelessWidget {
             ]),
           ),
         ),
-      );
+      ));
     }
 
     Widget row(int w) => Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -191,7 +351,7 @@ class MonthView extends StatelessWidget {
 
     return Column(children: [
       Row(children: [
-        for (final w in weekdayKo)
+        for (final w in weekdayShortEn)
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
@@ -266,23 +426,29 @@ class _TimeGridViewState extends State<TimeGridView> {
         const SizedBox(width: gutter),
         for (final d in widget.days)
           Expanded(
-            child: GestureDetector(
-              onTap: () => a.select(ymd(d)),
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(weekdayKo[weekdayIndex(d)], style: const TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
-                  const SizedBox(height: 4),
-                  Text(
-                    pad2(d.day),
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w200,
-                      color: ymd(d) == widget.sel ? widget.accent : (ymd(d) == today ? t100 : t70),
+            child: Pressable(
+              pressedScale: .95,
+              child: GestureDetector(
+                onTap: () => a.select(ymd(d)),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(weekdayShortEn[weekdayIndex(d)], style: const TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+                    const SizedBox(height: 4),
+                    // 선택한 날의 숫자 색이 부드럽게 바뀜
+                    AnimatedDefaultTextStyle(
+                      duration: Motion.of(context, Motion.base),
+                      style: TextStyle(
+                        fontFamily: 'MyCalendarSans',
+                        fontSize: 26,
+                        fontWeight: FontWeight.w200,
+                        color: ymd(d) == widget.sel ? widget.accent : (ymd(d) == today ? t100 : t70),
+                      ),
+                      child: Text(pad2(d.day)),
                     ),
-                  ),
-                ]),
+                  ]),
+                ),
               ),
             ),
           ),
@@ -292,7 +458,7 @@ class _TimeGridViewState extends State<TimeGridView> {
         decoration: const BoxDecoration(border: Border.symmetric(horizontal: BorderSide(color: hairline))),
         constraints: const BoxConstraints(minHeight: 30),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(width: gutter, child: Padding(padding: EdgeInsets.only(top: 9), child: Text('종일', style: TextStyle(fontSize: 10, color: t30)))),
+          const SizedBox(width: gutter, child: Padding(padding: EdgeInsets.only(top: 9), child: Text('ALL DAY', style: TextStyle(fontSize: 9, letterSpacing: .5, color: t30)))),
           for (final d in widget.days)
             Expanded(
               child: GestureDetector(
@@ -301,7 +467,7 @@ class _TimeGridViewState extends State<TimeGridView> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    for (final e in s.eventsOn(ymd(d)).where((e) => e.allDay)) eventChip(s, e, () => a.openEvent(e)),
+                    for (final e in s.eventsOn(ymd(d)).where((e) => e.allDay)) eventChip(s, e, a),
                     for (final x in s.todosOn(ymd(d))) todoChip(x, a, widget.accent, widget.ink),
                   ]),
                 ),
@@ -351,20 +517,33 @@ class _TimeGridViewState extends State<TimeGridView> {
                             height: ((p.endMin - p.startMin) / 60 * hh - 2).clamp(20, 24 * hh),
                             left: p.col * width / p.cols + 2,
                             width: width / p.cols - 4,
-                            child: GestureDetector(
-                              onTap: () => a.openEvent(p.e),
-                              child: Container(
-                                padding: const EdgeInsets.fromLTRB(7, 4, 6, 2),
-                                decoration: BoxDecoration(
-                                  color: hexColor(s.catOf(p.e.cat).color).withAlpha(38),
-                                  border: Border(left: BorderSide(color: hexColor(s.catOf(p.e.cat).color), width: 2)),
-                                ),
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
-                                  Flexible(
-                                    child: Text(p.e.title, overflow: TextOverflow.fade, style: const TextStyle(fontSize: 11.5, color: t100)),
+                            // 일정 블록: 처음 보일 때 위에서부터 차례로 떠오름 + 누르면 살짝 눌림
+                            child: StaggerIn(
+                              index: p.startMin ~/ 60,
+                              distance: 6,
+                              child: HoverChips(
+                                chips: eventHoverChips(p.e, a),
+                                alignment: Alignment.topRight,
+                                child: Pressable(
+                                  pressedScale: .97,
+                                  hoverGlow: true,
+                                  child: GestureDetector(
+                                    onTap: () => a.openEvent(p.e),
+                                    child: Container(
+                                      padding: const EdgeInsets.fromLTRB(7, 4, 6, 2),
+                                      decoration: BoxDecoration(
+                                        color: hexColor(s.catOf(p.e.cat).color).withAlpha(38),
+                                        border: Border(left: BorderSide(color: hexColor(s.catOf(p.e.cat).color), width: 2)),
+                                      ),
+                                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                        Text(p.e.start, style: const TextStyle(fontSize: 10, color: t50)),
+                                        Flexible(
+                                          child: Text(p.e.title, overflow: TextOverflow.fade, style: const TextStyle(fontSize: 11.5, color: t100)),
+                                        ),
+                                      ]),
+                                    ),
                                   ),
-                                ]),
+                                ),
                               ),
                             ),
                           ),

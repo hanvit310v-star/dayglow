@@ -84,14 +84,16 @@ class _AtmosphereState extends State<Atmosphere> with SingleTickerProviderStateM
     final pal = paletteOf(widget.theme);
     return Stack(fit: StackFit.expand, children: [
       // 1) 흐린 대기 배경 (테마가 바뀌면 부드럽게 겹쳐 바뀜)
-      AnimatedSwitcher(
+      // RepaintBoundary: 흐림(blur) 처리는 무거우니 테마가 바뀔 때만 다시 계산
+      RepaintBoundary(
+        child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 1200),
         child: ImageFiltered(
           key: ValueKey(widget.theme),
           imageFilter: ui.ImageFilter.blur(sigmaX: 40, sigmaY: 40, tileMode: TileMode.decal),
           child: CustomPaint(painter: _BlobPainter(pal), size: Size.infinite),
         ),
-      ),
+      )),
       // 2) 시간대 빛 (새벽·노을·밤)
       _glow(widget.tod == 'dawn', const [
         (Alignment(-0.4, 1.16), 0.9, Color(0x3DFFAC96)),
@@ -127,7 +129,7 @@ class _AtmosphereState extends State<Atmosphere> with SingleTickerProviderStateM
       ),
       // 4) 날씨 효과
       IgnorePointer(
-        child: AnimatedOpacity(
+        child: RepaintBoundary(child: AnimatedOpacity(
           opacity: widget.effectOpacity,
           duration: const Duration(milliseconds: 600),
           child: AnimatedBuilder(
@@ -142,7 +144,7 @@ class _AtmosphereState extends State<Atmosphere> with SingleTickerProviderStateM
               ),
             ),
           ),
-        ),
+        )),
       ),
     ]);
   }

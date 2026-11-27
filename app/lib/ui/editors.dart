@@ -5,10 +5,12 @@ import '../core/calendar_logic.dart';
 import '../core/models.dart';
 import '../data/calendar_store.dart';
 import '../mood/mood_controller.dart';
+import 'motion.dart';
 import 'palette.dart';
+import 'strings.dart';
 
-const repeatOptions = {'none': '반복 안 함', 'daily': '매일', 'weekly': '매주 (같은 요일)', 'monthly': '매월 (같은 날짜)'};
-const remindOptions = <int?, String>{null: '알림 없음', 10: '10분 전', 60: '1시간 전', 1440: '하루 전'};
+const repeatOptions = {'none': 'Never', 'daily': 'Daily', 'weekly': 'Weekly', 'monthly': 'Monthly'};
+const remindOptions = <int?, String>{null: 'None', 10: '10 min before', 60: '1 hour before', 1440: '1 day before'};
 
 // ===== 공통 부품 =====
 class FieldLabel extends StatelessWidget {
@@ -54,17 +56,33 @@ class TextTab extends StatelessWidget {
   final Color accent;
   final Widget? trailing;
   const TextTab({super.key, required this.label, required this.on, required this.onTap, this.accent = t100, this.trailing});
+  // 선택하면 글자가 밝아지고 밑줄이 가운데에서 양옆으로 그어짐
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: on ? accent : Colors.transparent))),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(label, style: TextStyle(fontSize: 13, color: on ? t100 : t50)),
-            if (trailing != null) ...[const SizedBox(width: 4), trailing!],
-          ]),
+  Widget build(BuildContext context) => Pressable(
+        pressedScale: .94,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                AnimatedDefaultTextStyle(
+                  duration: Motion.of(context, Motion.base),
+                  style: TextStyle(fontFamily: 'MyCalendarSans', fontWeight: FontWeight.w300, fontSize: 13, color: on ? t100 : t50),
+                  child: Text(label),
+                ),
+                if (trailing != null) ...[const SizedBox(width: 4), trailing!],
+              ]),
+              const SizedBox(height: 3),
+              AnimatedScale(
+                scale: on ? 1 : 0,
+                duration: Motion.of(context, Motion.base),
+                curve: Motion.ease,
+                child: Container(height: 1, width: 40, constraints: const BoxConstraints(maxWidth: 40), color: accent),
+              ),
+            ]),
+          ),
         ),
       );
 }
@@ -86,7 +104,7 @@ ButtonStyle textButton({Color color = t50}) => TextButton.styleFrom(
 
 Color sheetColor(WxPalette pal) => Color.alphaBlend(pal.w0.withAlpha(110), pal.bg).withAlpha(242);
 
-void showToast(BuildContext context, WxPalette pal, String msg) {
+void showToast(BuildContext context, WxPalette pal, String msg, {VoidCallback? undo}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(
@@ -95,7 +113,8 @@ void showToast(BuildContext context, WxPalette pal, String msg) {
       backgroundColor: pal.bg.withAlpha(235),
       shape: const RoundedRectangleBorder(side: BorderSide(color: hairline)),
       width: 420,
-      duration: const Duration(seconds: 3),
+      action: undo == null ? null : SnackBarAction(label: 'Undo', textColor: pal.accent, onPressed: undo),
+      duration: Duration(seconds: undo == null ? 3 : 5),
     ));
 }
 
@@ -111,10 +130,21 @@ Future<String?> showEditor(
   int? hour,
   bool fromCell = false,
 }) =>
-    showDialog<String>(
+    // 입력 창: 살짝 작게 시작해서 커지며 떠오름
+    showGeneralDialog<String>(
       context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close',
       barrierColor: const Color(0x8C080B0A),
-      builder: (_) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell),
+      transitionDuration: Motion.of(context, const Duration(milliseconds: 160)), // 일정 창이 열리는 속도
+      pageBuilder: (_, _, _) => _EditorDialog(store: store, pal: pal, event: event, todo: todo, date: date, hour: hour, fromCell: fromCell),
+      transitionBuilder: (_, anim, _, child) {
+        final a = CurvedAnimation(parent: anim, curve: Motion.ease, reverseCurve: Curves.easeIn);
+        return FadeTransition(
+          opacity: a,
+          child: ScaleTransition(scale: Tween(begin: .96, end: 1.0).animate(a), child: child),
+        );
+      },
     );
 
 class _EditorDialog extends StatefulWidget {
@@ -210,10 +240,10 @@ class _EditorDialogState extends State<_EditorDialog> {
       if (text.isEmpty) return setState(() => err = '할 일을 입력해 주세요.');
       if (widget.todo != null) {
         s.updateTodo(widget.todo!.id, text: text, due: due, done: done);
-        return Navigator.pop(context, '할 일을 수정했어요.');
+        return Navigator.pop(context, 'Task updated');
       }
       s.addTodo(text, due: due);
-      return Navigator.pop(context, due.isEmpty ? '할 일을 추가했어요. (마감일 없는 할 일)' : '할 일을 추가했어요. (${monthDay(due)})');
+      return Navigator.pop(context, due.isEmpty ? 'Task added · Someday' : 'Task added · ${enMonthDay(due)}');
     }
     final title = titleCtl.text.trim();
     if (title.isEmpty) return setState(() => err = '제목을 입력해 주세요.');
@@ -240,7 +270,7 @@ class _EditorDialogState extends State<_EditorDialog> {
     }
     if (cat == '__new') cand.cat = s.addCategory(newCatCtl.text.trim()).id;
     s.upsertEvent(cand);
-    Navigator.pop(context, widget.event != null ? '일정을 수정했어요.' : '일정을 추가했어요.');
+    Navigator.pop(context, widget.event != null ? 'Event updated' : 'Event added');
   }
 
   Future<void> _delete() async {
@@ -254,18 +284,18 @@ class _EditorDialogState extends State<_EditorDialog> {
         content: Text(isTodo ? '이 할 일을 삭제할까요?' : (repeating ? '반복 일정 전체가 삭제돼요. 삭제할까요?' : '이 일정을 삭제할까요?'),
             style: const TextStyle(color: t100, fontSize: 14)),
         actions: [
-          TextButton(style: textButton(), onPressed: () => Navigator.pop(c, false), child: const Text('취소')),
-          TextButton(style: textButton(color: softRed), onPressed: () => Navigator.pop(c, true), child: const Text('삭제')),
+          TextButton(style: textButton(), onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          TextButton(style: textButton(color: softRed), onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
         ],
       ),
     );
     if (ok != true || !mounted) return;
     if (isTodo) {
       widget.store.deleteTodo(widget.todo!.id);
-      Navigator.pop(context, '할 일을 삭제했어요.');
+      Navigator.pop(context, 'Task deleted');
     } else {
       widget.store.deleteEvent(widget.event!.id);
-      Navigator.pop(context, '일정을 삭제했어요.');
+      Navigator.pop(context, 'Event deleted');
     }
   }
 
@@ -301,7 +331,7 @@ class _EditorDialogState extends State<_EditorDialog> {
   Widget build(BuildContext context) {
     final s = widget.store;
     final textStyle = const TextStyle(fontSize: 15, color: t100, fontWeight: FontWeight.w300);
-    final title = isNew ? '새로 추가' : (mode == 'todo' ? '할 일 수정' : '일정 수정');
+    final title = isNew ? 'New' : (mode == 'todo' ? 'Edit task' : 'Edit event');
     return Dialog(
       backgroundColor: sheetColor(pal),
       insetPadding: const EdgeInsets.all(16),
@@ -317,42 +347,42 @@ class _EditorDialogState extends State<_EditorDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 22),
                 child: Row(children: [
-                  TextTab(label: '일정', on: mode == 'event', onTap: () => _switchTab('event')),
+                  TextTab(label: 'Event', on: mode == 'event', onTap: () => _switchTab('event')),
                   const SizedBox(width: 22),
-                  TextTab(label: '할 일', on: mode == 'todo', onTap: () => _switchTab('todo')),
+                  TextTab(label: 'Task', on: mode == 'todo', onTap: () => _switchTab('todo')),
                 ]),
               ),
             if (mode == 'event') ...[
-              _field('제목', TextField(controller: titleCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 팀 회의'))),
+              _field('TITLE', TextField(controller: titleCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 팀 회의'))),
               _field(
-                '날짜',
+                'DATE',
                 _two(
-                  UnderlineSelect(text: date, onTap: () => _pickDate(date, (v) => date = v)),
+                  UnderlineSelect(text: enFullDate(parseYmd(date)), onTap: () => _pickDate(date, (v) => date = v)),
                   Row(children: [
                     Checkbox(value: allDay, activeColor: pal.accent, checkColor: pal.accentInk, onChanged: (v) => setState(() => allDay = v ?? false)),
-                    const Text('종일', style: TextStyle(fontSize: 13, color: t70)),
+                    const Text('All day', style: TextStyle(fontSize: 13, color: t70)),
                   ]),
                 ),
               ),
               if (!allDay)
                 _field(
-                  '시작 · 종료',
+                  'START · END',
                   _two(
                     UnderlineSelect(text: start, onTap: () => _pickTime(start, (v) => start = v)),
                     UnderlineSelect(text: end, onTap: () => _pickTime(end, (v) => end = v)),
                   ),
                 ),
               _field(
-                '카테고리 · 반복',
+                'CATEGORY · REPEAT',
                 _two(
-                  _dropdown<String>(cat, {for (final c in s.cats) c.id: c.name, '__new': '+ 새 카테고리…'}, (v) => setState(() => cat = v ?? cat)),
+                  _dropdown<String>(cat, {for (final c in s.cats) c.id: c.name, '__new': '+ New category…'}, (v) => setState(() => cat = v ?? cat)),
                   _dropdown<String>(repeat, repeatOptions, (v) => setState(() => repeat = v ?? 'none')),
                 ),
               ),
               if (cat == '__new')
-                _field('새 카테고리 이름', TextField(controller: newCatCtl, autofocus: true, style: textStyle, decoration: underlineDecoration(pal.accent))),
-              _field('알림 (앱 알림은 다음 단계에서 연결)', _dropdown<int?>(remind, remindOptions, (v) => setState(() => remind = v))),
-              _field('메모', TextField(controller: memoCtl, maxLines: 2, style: textStyle, decoration: underlineDecoration(pal.accent))),
+                _field('NEW CATEGORY', TextField(controller: newCatCtl, autofocus: true, style: textStyle, decoration: underlineDecoration(pal.accent))),
+              _field('REMINDER  ·  앱 알림은 다음 단계에서 연결', _dropdown<int?>(remind, remindOptions, (v) => setState(() => remind = v))),
+              _field('MEMO', TextField(controller: memoCtl, maxLines: 2, style: textStyle, decoration: underlineDecoration(pal.accent))),
               if (warn.isNotEmpty)
                 Container(
                   width: double.infinity,
@@ -365,28 +395,28 @@ class _EditorDialogState extends State<_EditorDialog> {
                   ),
                 ),
             ] else ...[
-              _field('할 일', TextField(controller: todoCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 보고서 초안 쓰기'))),
+              _field('TASK', TextField(controller: todoCtl, autofocus: isNew, style: textStyle, decoration: underlineDecoration(pal.accent, hint: '예: 보고서 초안 쓰기'))),
               _field(
-                '마감일 · 비워 두면 \'마감일 없는 할 일\'에 들어가요',
+                'DUE  ·  비워 두면 Someday에 들어가요',
                 Row(children: [
-                  Expanded(child: UnderlineSelect(text: due.isEmpty ? '마감일 없음' : due, onTap: () => _pickDate(due, (v) => due = v))),
-                  if (due.isNotEmpty) TextButton(style: textButton(), onPressed: () => setState(() => due = ''), child: const Text('지우기')),
+                  Expanded(child: UnderlineSelect(text: due.isEmpty ? 'No due date' : enFullDate(parseYmd(due)), onTap: () => _pickDate(due, (v) => due = v))),
+                  if (due.isNotEmpty) TextButton(style: textButton(), onPressed: () => setState(() => due = ''), child: const Text('Clear')),
                 ]),
               ),
               if (widget.todo != null)
                 Row(children: [
                   Checkbox(value: done, activeColor: pal.accent, checkColor: pal.accentInk, onChanged: (v) => setState(() => done = v ?? false)),
-                  const Text('완료', style: TextStyle(fontSize: 13, color: t70)),
+                  const Text('Done', style: TextStyle(fontSize: 13, color: t70)),
                 ]),
             ],
             if (err.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(err, style: const TextStyle(fontSize: 12, color: softRed))),
             const SizedBox(height: 18),
             Row(children: [
-              if (!isNew) TextButton(style: textButton(color: softRed), onPressed: _delete, child: const Text('삭제')),
+              if (!isNew) TextButton(style: textButton(color: softRed), onPressed: _delete, child: const Text('Delete')),
               const Spacer(),
-              TextButton(style: textButton(), onPressed: () => Navigator.pop(context), child: const Text('취소')),
+              TextButton(style: textButton(), onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
               const SizedBox(width: 12),
-              TextButton(style: accentButton(pal), onPressed: _save, child: Text(forceSave ? '그래도 저장' : '저장')),
+              TextButton(style: accentButton(pal), onPressed: _save, child: Text(forceSave ? 'Save anyway' : 'Save')),
             ]),
           ]),
         ),
@@ -409,7 +439,7 @@ Future<void> showMoodPanel(BuildContext context, {required MoodController mood, 
   return showGeneralDialog(
     context: context,
     barrierDismissible: true,
-    barrierLabel: '닫기',
+    barrierLabel: 'Close',
     barrierColor: const Color(0x33000000),
     transitionDuration: const Duration(milliseconds: 220),
     pageBuilder: (_, _, _) => Align(
@@ -439,7 +469,7 @@ class _MoodPanel extends StatelessWidget {
               runSpacing: 6,
               children: [
                 TextTab(
-                  label: '자동',
+                  label: 'Auto',
                   on: current == 'auto',
                   accent: pal.accent,
                   onTap: () => set('auto'),
@@ -480,15 +510,15 @@ class _MoodPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                 Row(children: [
-                  const Text('분위기', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+                  const Text('MOOD', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
                   const Spacer(),
-                  TextButton(style: textButton(color: pal.accent), onPressed: mood.resetAll, child: const Text('모두 자동으로')),
+                  TextButton(style: textButton(color: pal.accent), onPressed: mood.resetAll, child: const Text('Reset to auto')),
                 ]),
-                row('날씨', chips(weatherLabel, mood.weatherMode, mood.wx == null ? null : weatherLabel[mood.wx!.theme], mood.setWeatherMode)),
-                row('시간대', chips(todLabel, mood.todMode, todLabel[mood.autoTod()], mood.setTodMode)),
-                row('기온', chips(tempLabel, mood.tempMode, mood.autoTemp == null ? null : tempLabel[mood.autoTemp!], mood.setTempMode)),
+                row('WEATHER', chips(weatherLabel, mood.weatherMode, mood.wx == null ? null : weatherLabel[mood.wx!.theme], mood.setWeatherMode)),
+                row('TIME', chips(todLabel, mood.todMode, todLabel[mood.autoTod()], mood.setTodMode)),
+                row('TEMP', chips(tempLabel, mood.tempMode, mood.autoTemp == null ? null : tempLabel[mood.autoTemp!], mood.setTempMode)),
                 row(
-                  '효과',
+                  'EFFECT',
                   Row(children: [
                     Expanded(
                       child: Slider(
@@ -501,13 +531,13 @@ class _MoodPanel extends StatelessWidget {
                         onChanged: (v) => mood.setIntensity(v.round()),
                       ),
                     ),
-                    SizedBox(width: 38, child: Text(mood.intensity == 0 ? '끔' : '${mood.intensity}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, color: t70))),
+                    SizedBox(width: 38, child: Text(mood.intensity == 0 ? 'Off' : '${mood.intensity}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, color: t70))),
                   ]),
                 ),
-                toggle('바쁜 날엔 차분하게', '오늘 일정 $busyEvents개 이상이거나 빈 시간이 ${busyFreeMinutes ~/ 60}시간 미만이면 효과를 줄여요', mood.busyCalm, mood.setBusyCalm),
-                toggle('일정 중엔 효과 멈춤', '진행 중인 일정을 왼쪽 아래에 표시해요', mood.focus, mood.setFocus),
+                toggle('Calm on busy days', '오늘 일정 $busyEvents개 이상이거나 빈 시간이 ${busyFreeMinutes ~/ 60}시간 미만이면 효과를 줄여요', mood.busyCalm, mood.setBusyCalm),
+                toggle('Pause during events', '진행 중인 일정을 왼쪽 아래에 표시해요', mood.focus, mood.setFocus),
                 const SizedBox(height: 12),
-                Text('지금 적용 중: ${mood.label}${mood.wx != null ? ' · ${mood.wx!.temp}°' : ''}${mood.windStrong ? ' · 강풍' : ''}$extra',
+                Text('Now · ${mood.label}${mood.wx != null ? ' · ${mood.wx!.temp}°' : ''}${mood.windStrong ? ' · Windy' : ''}$extra',
                     style: const TextStyle(fontSize: 12, height: 1.6, color: t50)),
               ]),
             ),
@@ -536,7 +566,7 @@ Future<void> showCategoryMenu(BuildContext context, {required CalendarStore stor
           builder: (context, _) => Padding(
             padding: const EdgeInsets.all(22),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('보여 줄 카테고리', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+              const Text('CATEGORIES', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
               const SizedBox(height: 8),
               for (final c in store.cats)
                 InkWell(
@@ -557,7 +587,7 @@ Future<void> showCategoryMenu(BuildContext context, {required CalendarStore stor
                   child: TextField(
                     controller: ctl,
                     style: const TextStyle(fontSize: 13, color: t100),
-                    decoration: underlineDecoration(pal.accent, hint: '새 카테고리 이름'),
+                    decoration: underlineDecoration(pal.accent, hint: 'New category'),
                     onSubmitted: (v) {
                       if (v.trim().isEmpty) return;
                       store.addCategory(v.trim());
@@ -572,7 +602,7 @@ Future<void> showCategoryMenu(BuildContext context, {required CalendarStore stor
                     store.addCategory(ctl.text.trim());
                     ctl.clear();
                   },
-                  child: const Text('추가'),
+                  child: const Text('Add'),
                 ),
               ]),
             ]),
@@ -600,7 +630,7 @@ Future<void> showSettings(BuildContext context, {required MoodController mood, r
           builder: (context, _) => Padding(
             padding: const EdgeInsets.all(22),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('분위기 (날씨·상황)', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+              const Text('MOOD', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
               const SizedBox(height: 10),
               Text(mood.statusText.isEmpty ? '아직 날씨를 확인하지 않았어요.' : mood.statusText, style: const TextStyle(fontSize: 12, height: 1.6, color: t50)),
               Row(children: [
@@ -610,14 +640,14 @@ Future<void> showSettings(BuildContext context, {required MoodController mood, r
                     Navigator.pop(c);
                     openMood();
                   },
-                  child: const Text('분위기 직접 고르기'),
+                  child: const Text('Choose mood'),
                 ),
-                TextButton(style: textButton(color: pal.accent), onPressed: () => mood.refresh(force: true), child: const Text('날씨 다시 확인')),
+                TextButton(style: textButton(color: pal.accent), onPressed: () => mood.refresh(force: true), child: const Text('Refresh weather')),
               ]),
               const Text('위치는 날씨를 확인할 때만 쓰고 저장하지 않아요. 약 1km 단위로 뭉갠 좌표만 날씨 서비스(Open-Meteo)로 보내요.',
                   style: TextStyle(fontSize: 11, height: 1.6, color: t30)),
               const Divider(color: hairline, height: 32),
-              const Text('곧 추가될 기능', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
+              const Text('COMING SOON', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: t30)),
               const SizedBox(height: 8),
               const Text('일정 알림 · 백업 불러오기(웹 버전 데이터 옮기기) · 로그인과 기기 간 동기화', style: TextStyle(fontSize: 12, height: 1.6, color: t50)),
             ]),

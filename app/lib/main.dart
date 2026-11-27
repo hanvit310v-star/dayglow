@@ -28,8 +28,8 @@ class MyCalendarApp extends StatelessWidget {
     return MaterialApp(
       title: 'my.calendar',
       debugShowCheckedModeBanner: false,
-      locale: const Locale('ko'),
-      supportedLocales: const [Locale('ko'), Locale('en')],
+      locale: const Locale('en'),
+      supportedLocales: const [Locale('en'), Locale('ko')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: ThemeData(
         useMaterial3: true,

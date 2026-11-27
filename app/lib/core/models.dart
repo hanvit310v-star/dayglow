@@ -100,10 +100,10 @@ class Category {
 
 /// 기본 카테고리 (어두운 배경에 맞춘 차분한 색) — 이름·색을 바꿔 보세요
 List<Category> defaultCategories() => [
-      Category(id: 'meeting', name: '회의', color: '#8fb3d9'),
-      Category(id: 'deadline', name: '업무 마감', color: '#e09b8f'),
-      Category(id: 'personal', name: '개인', color: '#a3c9a8'),
-      Category(id: 'etc', name: '기타', color: '#a7aaa8'),
+      Category(id: 'meeting', name: 'Meeting', color: '#8fb3d9'),
+      Category(id: 'deadline', name: 'Deadline', color: '#e09b8f'),
+      Category(id: 'personal', name: 'Personal', color: '#a3c9a8'),
+      Category(id: 'etc', name: 'Other', color: '#a7aaa8'),
     ];
 
 /// 새 카테고리를 만들 때 차례로 쓰는 색

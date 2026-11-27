@@ -12,7 +12,9 @@ import '../mood/mood_controller.dart';
 import 'atmosphere.dart';
 import 'calendar_views.dart';
 import 'editors.dart';
+import 'motion.dart';
 import 'palette.dart';
+import 'strings.dart';
 
 class HomePage extends StatefulWidget {
   final CalendarStore store;
@@ -82,7 +84,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 화면 조각(패널 등)에서 화면을 다시 그릴 때 쓰는 통로
   void update(VoidCallback fn) => setState(fn);
 
-  void toast(String m) => showToast(context, paletteOf(mood.theme), m);
+  void toast(String m, {VoidCallback? undo}) => showToast(context, paletteOf(mood.theme), m, undo: undo);
 
   Future<void> openEditor({CalEvent? event, Todo? todo, String? date, int? hour, bool fromCell = false}) async {
     final msg = await showEditor(context,
@@ -96,48 +98,77 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void openMood() => showMoodPanel(context, mood: mood, extraStatus: moodExtra, wide: MediaQuery.sizeOf(context).width >= 1080);
 
   void setView(String v) => setState(() {
+        navDir = 0;
         view = v;
         if (v != 'month') cursor = parseYmd(sel);
       });
 
+  // 움직임 방향: 다음(미래)이면 1, 이전(과거)이면 -1, 보기 전환이면 0
+  int navDir = 1; // 달력 화면이 들어오는 방향
+  int selDir = 1; // 큰 날짜 숫자가 굴러가는 방향
+
+  void selectDay(String ds) {
+    if (ds != sel) selDir = ds.compareTo(sel) > 0 ? 1 : -1;
+    sel = ds;
+  }
+
   void move(int dir) => setState(() {
+        navDir = dir;
         if (view == 'month') {
           cursor = DateTime(cursor.year, cursor.month + dir, 1);
         } else {
           cursor = addDays(cursor, dir * (view == 'week' ? 7 : 1));
-          if (view == 'day') sel = ymd(cursor);
+          if (view == 'day') selectDay(ymd(cursor));
         }
       });
 
   void goToday() => setState(() {
-        cursor = dateOnly(DateTime.now());
-        sel = todayStr();
+        final t = dateOnly(DateTime.now());
+        navDir = t.isAfter(cursor) ? 1 : -1;
+        cursor = t;
+        selectDay(todayStr());
       });
 
   late final actions = CalendarActions(
-    select: (ds) => setState(() => sel = ds),
+    select: (ds) => setState(() => selectDay(ds)),
     addAt: (ds, {hour}) {
-      setState(() => sel = ds);
+      setState(() => selectDay(ds));
       openEditor(date: ds, hour: hour, fromCell: true);
     },
     openEvent: (e) => openEditor(event: e),
     openTodo: (t) => openEditor(todo: t),
+    // 일정 위 호버 칩: 복제 · 하루 뒤로 · 삭제 (삭제는 '되돌리기' 버튼이 있는 알림을 띄움)
+    duplicateEvent: (e) {
+      store.upsertEvent(e.copy()..id = newId()..repeat = 'none');
+      toast('Event duplicated');
+    },
+    postponeEvent: (e) {
+      final before = e.copy();
+      store.upsertEvent(e.copy()..date = ymd(addDays(parseYmd(e.date), 1)));
+      toast('Moved to tomorrow', undo: () => store.upsertEvent(before));
+    },
+    deleteEvent: (e) {
+      final backup = e.copy();
+      store.deleteEvent(e.id);
+      toast('Event deleted', undo: () => store.upsertEvent(backup));
+    },
     toggleTodo: store.toggleTodo,
     showDay: (ds) => setState(() {
-      sel = ds;
+      selectDay(ds);
       cursor = parseYmd(ds);
+      navDir = 0;
       view = 'day';
     }),
   );
 
   String get title {
     final c = cursor;
-    if (view == 'month') return '${c.year} · ${c.month}월';
+    if (view == 'month') return '${monthLongEn[c.month - 1]} ${c.year}';
     if (view == 'week') {
       final s = addDays(c, -weekdayIndex(c)), e = addDays(s, 6);
-      return '${s.year} · ${monthDay(ymd(s))} – ${monthDay(ymd(e))}';
+      return '${enMonthDay(ymd(s))} – ${enMonthDay(ymd(e))}, ${e.year}';
     }
-    return '${c.year} · ${c.month}월 ${c.day}일 ${weekdayKo[weekdayIndex(c)]}요일';
+    return '${weekdayLongEn[weekdayIndex(c)]}, ${enFullDate(c)}';
   }
 
   // ===== 화면 =====
@@ -151,17 +182,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         final wide = width >= 1080;
         final compact = width < 640;
         final busyNow = mood.busyCalm && busy;
-        final atmosphere = Atmosphere(
+        final atmosphere = RepaintBoundary(child: Atmosphere(
           theme: mood.theme,
           tod: mood.tod,
           temp: mood.temp,
           effectOpacity: mood.intensity / 100 * (busyNow ? 0.4 : 1),
           paused: focusEvent != null,
           windStrong: mood.windStrong,
-        );
+        ));
 
-        final left = _LeftPane(state: this, pal: pal, wide: wide, compact: compact);
-        final right = _RightPanel(state: this, pal: pal, wide: wide);
+        // RepaintBoundary: 배경의 비·눈 효과가 매 프레임 다시 그려져도
+        // 달력·오른쪽 목록은 바뀔 때만 다시 그리도록 분리 (클릭·입력 반응 속도 개선)
+        final left = RepaintBoundary(child: _LeftPane(state: this, pal: pal, wide: wide, compact: compact));
+        final right = RepaintBoundary(child: _RightPanel(state: this, pal: pal, wide: wide));
 
         return AnimatedContainer(
           duration: const Duration(milliseconds: 1200),
@@ -215,31 +248,26 @@ class _LeftPane extends StatelessWidget {
     final pad = compact ? 18.0 : (wide ? 48.0 : 32.0);
 
     final viewTabs = Row(mainAxisSize: MainAxisSize.min, children: [
-      for (final v in const [('month', '월'), ('week', '주'), ('day', '일')]) ...[
+      for (final v in const [('month', 'M'), ('week', 'W'), ('day', 'D')]) ...[
         TextTab(label: v.$2, on: s.view == v.$1, onTap: () => s.setView(v.$1)),
         const SizedBox(width: 18),
       ],
     ]);
     final nav = Row(mainAxisSize: MainAxisSize.min, children: [
-      IconButton(onPressed: () => s.move(-1), icon: const Icon(Icons.chevron_left, size: 18), color: t50, tooltip: '이전'),
-      TextButton(style: textButton(), onPressed: s.goToday, child: const Text('오늘')),
-      IconButton(onPressed: () => s.move(1), icon: const Icon(Icons.chevron_right, size: 18), color: t50, tooltip: '다음'),
+      Pressable(pressedScale: .88, child: IconButton(onPressed: () => s.move(-1), icon: const Icon(Icons.chevron_left, size: 18), color: t50, tooltip: 'Previous')),
+      Pressable(child: TextButton(style: textButton(), onPressed: s.goToday, child: const Text('Today'))),
+      Pressable(pressedScale: .88, child: IconButton(onPressed: () => s.move(1), icon: const Icon(Icons.chevron_right, size: 18), color: t50, tooltip: 'Next')),
     ]);
     final offCats = s.store.cats.where((c) => !c.on).length;
     final tools = Row(mainAxisSize: MainAxisSize.min, children: [
-      TextButton(
-        style: textButton(),
-        onPressed: () => showCategoryMenu(context, store: s.store, pal: pal),
-        child: Text(offCats > 0 ? '카테고리 ${s.store.cats.length - offCats}/${s.store.cats.length}' : '카테고리'),
+      Pressable(
+        child: TextButton(
+          style: textButton(),
+          onPressed: () => showCategoryMenu(context, store: s.store, pal: pal),
+          child: RollingText(offCats > 0 ? 'Category ${s.store.cats.length - offCats}/${s.store.cats.length}' : 'Category',
+              style: const TextStyle(fontSize: 13)),
+        ),
       ),
-      IconButton(
-        onPressed: () => showSettings(context, mood: s.mood, pal: pal, openMood: s.openMood),
-        icon: const Icon(Icons.tune, size: 18),
-        color: t50,
-        tooltip: '설정',
-      ),
-      const SizedBox(width: 10),
-      TextButton(style: accentButton(pal), onPressed: () => s.openEditor(date: s.sel), child: const Text('+ 추가')),
     ]);
     const brand = Text.rich(TextSpan(children: [
       TextSpan(text: 'my'),
@@ -284,15 +312,18 @@ class _LeftPane extends StatelessWidget {
       );
     }
 
+    // 달·주·날을 넘기면 그 방향에서 달력이 밀려 들어옴
+    final switcher = SlideSwitcher(switchKey: '${s.view}|${s.title}', direction: s.navDir, fill: wide, child: calendar);
+
     return Padding(
       padding: EdgeInsets.fromLTRB(pad, wide ? 40 : 20, pad, wide ? 44 : 28),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         top,
         Padding(
           padding: EdgeInsets.only(top: wide ? 30 : 22, bottom: 14),
-          child: Text(s.title, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
+          child: RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
         ),
-        if (wide) Expanded(child: calendar) else calendar,
+        if (wide) Expanded(child: switcher) else switcher,
         SizedBox(height: wide ? 30 : 24),
         _Hero(state: s, pal: pal, compact: compact),
       ]),
@@ -313,57 +344,105 @@ class _Hero extends StatelessWidget {
     final d = parseYmd(s.sel);
     final today = todayStr();
     final rel = s.sel == today
-        ? '오늘'
+        ? 'Today'
         : s.sel == ymd(addDays(DateTime.now(), 1))
-            ? '내일'
+            ? 'Tomorrow'
             : s.sel == ymd(addDays(DateTime.now(), -1))
-                ? '어제'
+                ? 'Yesterday'
                 : '';
     final nowEv = s.sel == today ? s.focusEvent : null;
     final count = s.store.eventsOn(s.sel).length;
+    final dir = s.selDir;
+    // 숫자·글자가 바뀌면 위(다음 날)·아래(이전 날)로 굴러가듯 교체
     Widget stat(String v, String k) => Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Text(v, style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w200, color: t100, height: 1)),
+          RollingText(v, direction: dir, alignment: Alignment.center,
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w200, color: t100, height: 1)),
           const SizedBox(height: 6),
-          Text(k, style: const TextStyle(fontSize: 11, color: t50)),
+          RollingText(k, alignment: Alignment.center, style: const TextStyle(fontSize: 11, color: t50)),
         ]);
     return Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 22, runSpacing: 12, children: [
-      Text(pad2(d.day),
+      RollingText(pad2(d.day),
+          direction: dir,
           style: TextStyle(fontSize: compact ? 72 : 112, fontWeight: FontWeight.w200, height: .82, letterSpacing: -4, color: t100)),
       Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text('${weekdayKo[weekdayIndex(d)]}요일',
-              style: TextStyle(fontSize: compact ? 28 : 38, fontWeight: FontWeight.w300, height: 1, color: t100)),
+          RollingText(weekdayLongEn[weekdayIndex(d)],
+              direction: dir, style: TextStyle(fontSize: compact ? 28 : 38, fontWeight: FontWeight.w300, height: 1.1, color: t100)),
           const SizedBox(height: 10),
-          Text('${rel.isNotEmpty ? '$rel · ' : ''}${d.year}. ${d.month}. ${d.day}', style: const TextStyle(fontSize: 12, color: t50)),
-          if (nowEv != null) ...[
-            const SizedBox(height: 8),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 6, height: 6, decoration: BoxDecoration(color: pal.accent, shape: BoxShape.circle)),
-              const SizedBox(width: 7),
-              Text('지금 · ${nowEv.title} ~${nowEv.end}', style: TextStyle(fontSize: 12, color: pal.accent)),
-            ]),
-          ],
+          RollingText('${rel.isNotEmpty ? '$rel · ' : ''}${enFullDate(d)}',
+              direction: dir, style: const TextStyle(fontSize: 12, color: t50)),
+          // 진행 중인 일정: 나타날 때 부드럽게 펼쳐지고, 점이 숨 쉬듯 깜빡임
+          AnimatedSize(
+            duration: Motion.of(context, Motion.base),
+            curve: Motion.ease,
+            child: nowEv == null
+                ? const SizedBox(height: 0)
+                : Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      _Breathing(color: pal.accent),
+                      const SizedBox(width: 7),
+                      Text('Now · ${nowEv.title} ~${nowEv.end}', style: TextStyle(fontSize: 12, color: pal.accent)),
+                    ]),
+                  ),
+          ),
         ]),
       ),
-      Padding(padding: const EdgeInsets.only(bottom: 6, left: 8), child: stat('$count', '일정')),
+      Padding(padding: const EdgeInsets.only(bottom: 6, left: 8), child: stat('$count', 'Events')),
       // 날씨 표시 = 분위기 패널을 여는 버튼
       Tooltip(
-        message: '분위기 직접 고르기',
-        child: InkWell(
-          onTap: s.openMood,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: underline))),
-            child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
-              stat(s.mood.wx != null ? '${s.mood.wx!.temp}°' : '·', s.mood.label),
-              const Padding(padding: EdgeInsets.only(left: 2, bottom: 1), child: Icon(Icons.expand_less, size: 13, color: t30)),
-            ]),
+        message: 'Choose mood',
+        child: Pressable(
+          hoverGlow: true,
+          child: GestureDetector(
+            onTap: s.openMood,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+              decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: underline))),
+              child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                stat(s.mood.wx != null ? '${s.mood.wx!.temp}°' : '·', s.mood.label),
+                const Padding(padding: EdgeInsets.only(left: 2, bottom: 1), child: Icon(Icons.expand_less, size: 13, color: t30)),
+              ]),
+            ),
           ),
         ),
       ),
     ]);
   }
+}
+
+/// 진행 중 일정 옆의 점: 천천히 숨 쉬듯 밝아졌다 흐려짐
+class _Breathing extends StatefulWidget {
+  final Color color;
+  const _Breathing({required this.color});
+  @override
+  State<_Breathing> createState() => _BreathingState();
+}
+
+class _BreathingState extends State<_Breathing> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2400));
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Motion.reduced(context)) {
+      _c.value = 1;
+    } else if (!_c.isAnimating) {
+      _c.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: Tween(begin: .35, end: 1.0).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+        child: Container(width: 6, height: 6, decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle)),
+      );
 }
 
 // ===== 오른쪽: 유리 패널 =====
@@ -387,16 +466,18 @@ class _RightPanel extends StatelessWidget {
               controller: s.searchCtl,
               onChanged: (v) => s.update(() => s.query = v.trim()),
               style: const TextStyle(fontSize: 13, color: t100),
-              decoration: underlineDecoration(pal.accent, hint: '일정 검색'),
+              decoration: underlineDecoration(pal.accent, hint: 'Search'),
             ),
           ),
         ),
-        SizedBox(
-          width: wide ? 76 : 60,
-          height: wide ? 76 : 60,
-          child: Material(
+        Pressable(
+          pressedScale: .94,
+          child: AnimatedContainer(
+            duration: Motion.of(context, Motion.slow),
+            width: wide ? 76 : 60,
+            height: wide ? 76 : 60,
             color: pal.accent,
-            child: InkWell(onTap: () {}, child: Icon(Icons.search, color: pal.accentInk, size: 20)),
+            child: Icon(Icons.search, color: pal.accentInk, size: 20),
           ),
         ),
       ]),
@@ -420,32 +501,31 @@ class _RightPanel extends StatelessWidget {
   Widget _sectionHead(String title, {Widget? trailing}) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: Row(children: [
-          Text(title, style: const TextStyle(fontSize: 13, color: t100)),
+          RollingText(title, direction: state.selDir, style: const TextStyle(fontSize: 13, color: t100)),
           const Spacer(),
           ?trailing,
         ]),
       );
 
+  // 목록 한 줄: 마우스를 올리면 은은하게 밝아지고, 누르면 살짝 눌림, 완료하면 글자가 부드럽게 흐려지며 줄이 그어짐
   Widget _item({required Widget lead, required String text, required String value, VoidCallback? onTap, bool done = false, bool over = false}) =>
-      InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          child: Row(children: [
-            lead,
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: over ? softRed : (done ? t30 : t50),
-                    decoration: done ? TextDecoration.lineThrough : null,
-                  )),
+      Builder(
+        builder: (context) => Pressable(
+          pressedScale: .985,
+          hoverGlow: true,
+          child: GestureDetector(
+            onTap: onTap,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              child: Row(children: [
+                lead,
+                const SizedBox(width: 10),
+                Expanded(child: todoText(context, text, done: done, over: over)),
+                Text(value, style: const TextStyle(fontSize: 12, color: t70)),
+              ]),
             ),
-            Text(value, style: const TextStyle(fontSize: 12, color: t70)),
-          ]),
+          ),
         ),
       );
 
@@ -457,13 +537,13 @@ class _RightPanel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _sectionHead('검색 결과 ${hits.length}개'),
-        if (hits.isEmpty) const Text('검색 결과가 없어요.', style: TextStyle(fontSize: 13, color: t30)),
-        for (final e in hits.take(20))
-          _item(
+        _sectionHead('Results  ${hits.length}'),
+        if (hits.isEmpty) const Text('No results', style: TextStyle(fontSize: 13, color: t30)),
+        for (final (i, e) in hits.take(20).indexed)
+          StaggerIn(key: ValueKey('r${e.id}'), index: i, child: _item(
             lead: Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(s.store.catOf(e.cat).color), shape: BoxShape.circle)),
             text: e.title,
-            value: '${monthDay(e.date)} ${e.allDay ? '종일' : e.start}${e.repeat != 'none' ? ' · 반복' : ''}',
+            value: '${enMonthDay(e.date)} ${e.allDay ? 'All day' : e.start}${e.repeat != 'none' ? ' · Repeats' : ''}',
             onTap: () {
               s.update(() {
                 s.sel = e.date;
@@ -473,7 +553,7 @@ class _RightPanel extends StatelessWidget {
               });
               s.openEditor(event: e);
             },
-          ),
+          )),
       ]),
     );
   }
@@ -482,7 +562,6 @@ class _RightPanel extends StatelessWidget {
     final s = state;
     final st = s.store;
     final ds = s.sel;
-    final d = parseYmd(ds);
     final today = todayStr();
     final evs = st.eventsOn(ds);
     final tds = st.todosOn(ds);
@@ -491,40 +570,50 @@ class _RightPanel extends StatelessWidget {
     final open = undated.where((t) => !t.done).toList();
     final done = undated.where((t) => t.done).toList();
     Widget divider() => const Divider(color: hairline, height: 1);
+    // 요약 숫자: 바뀌면 굴러가듯 교체
     Widget kv(String k, String v, {bool warn = false}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 9),
           child: Row(children: [
             Text(k, style: const TextStyle(fontSize: 13, color: t50)),
             const Spacer(),
-            Text(v, style: TextStyle(fontSize: 13, color: warn ? softRed : t100)),
+            RollingText(v, direction: s.selDir, alignment: Alignment.centerRight,
+                style: TextStyle(fontSize: 13, color: warn ? softRed : t100)),
           ]),
         );
+    var n = 0; // 목록이 차례로 나타나는 순서
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // 선택한 날의 목록
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 30),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _sectionHead(
-            ds == today ? '오늘의 일정' : '${monthDay(ds)} ${weekdayKo[weekdayIndex(d)]}요일',
-            trailing: TextButton(style: textButton(color: pal.accent), onPressed: () => s.openEditor(date: ds, fromCell: true), child: const Text('+ 추가')),
-          ),
-          if (evs.isEmpty && tds.isEmpty) const Text('비어 있는 하루예요.', style: TextStyle(fontSize: 13, color: t30)),
+          _sectionHead(ds == today ? 'Today' : enDayLabel(ds)),
+          if (evs.isEmpty && tds.isEmpty)
+            StaggerIn(key: ValueKey('empty$ds'), index: 0, child: const Text('Nothing planned', style: TextStyle(fontSize: 13, color: t30))),
+          // 날짜를 바꾸면 항목이 하나씩 차례로 떠오름 (key에 날짜를 넣어 매번 다시 재생)
           for (final e in evs)
-            _item(
-              lead: Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(st.catOf(e.cat).color), shape: BoxShape.circle)),
-              text: e.title,
-              value: e.allDay ? '종일' : e.start,
-              onTap: () => s.openEditor(event: e),
+            StaggerIn(
+              key: ValueKey('$ds-e${e.id}'),
+              index: n++,
+              child: _item(
+                lead: Container(width: 5, height: 5, decoration: BoxDecoration(color: hexColor(st.catOf(e.cat).color), shape: BoxShape.circle)),
+                text: e.title,
+                value: e.allDay ? 'All day' : e.start,
+                onTap: () => s.openEditor(event: e),
+              ),
             ),
           for (final x in tds)
-            _item(
-              lead: TodoCircle(done: x.t.done, accent: pal.accent, ink: pal.accentInk, onTap: () => st.toggleTodo(x.t.id)),
-              text: x.t.text,
-              value: x.over ? '${monthDay(x.t.due)} 마감' : '할 일',
-              done: x.t.done,
-              over: x.over,
-              onTap: () => s.openEditor(todo: x.t),
+            StaggerIn(
+              key: ValueKey('$ds-t${x.t.id}'),
+              index: n++,
+              child: _item(
+                lead: TodoCircle(done: x.t.done, accent: pal.accent, ink: pal.accentInk, onTap: () => st.toggleTodo(x.t.id)),
+                text: x.t.text,
+                value: x.over ? 'Due ${enMonthDay(x.t.due)}' : 'Task',
+                done: x.t.done,
+                over: x.over,
+                onTap: () => s.openEditor(todo: x.t),
+              ),
             ),
         ]),
       ),
@@ -533,11 +622,11 @@ class _RightPanel extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 30),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _sectionHead('하루 요약'),
-          kv('일정', '${evs.length}'),
-          kv('할 일 (완료/전체)', '${dayTodos.where((t) => t.done).length} / ${dayTodos.length}'),
-          kv('비어 있는 시간 (${activeHours.start}–${activeHours.end}시)', hoursMinutes(st.freeMinutes(ds))),
-          kv('밀린 할 일', '${st.overdueCount}', warn: st.overdueCount > 0),
+          _sectionHead('Summary'),
+          kv('Events', '${evs.length}'),
+          kv('Tasks done', '${dayTodos.where((t) => t.done).length} / ${dayTodos.length}'),
+          kv('Free time  ${activeHours.start}–${activeHours.end}', hoursMinutes(st.freeMinutes(ds))),
+          kv('Overdue', '${st.overdueCount}', warn: st.overdueCount > 0),
         ]),
       ),
       // 마감일 없는 할 일 (접이식)
@@ -546,21 +635,33 @@ class _RightPanel extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 26),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            InkWell(
-              onTap: () => s.update(() => s.todoOpen = !s.todoOpen),
-              child: Row(children: [
-                const Text('마감일 없는 할 일', style: TextStyle(fontSize: 13, color: t100)),
-                const SizedBox(width: 8),
-                Text(open.isEmpty ? '모두 완료' : pad2(open.length), style: const TextStyle(fontSize: 13, color: t50)),
-                const Spacer(),
-                AnimatedRotation(
-                  turns: s.todoOpen ? .5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: const Icon(Icons.expand_more, size: 16, color: t30),
-                ),
-              ]),
+            Pressable(
+              pressedScale: .985,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => s.update(() => s.todoOpen = !s.todoOpen),
+                child: Row(children: [
+                  const Text('Someday', style: TextStyle(fontSize: 13, color: t100)),
+                  const SizedBox(width: 8),
+                  RollingText(open.isEmpty ? 'All done' : pad2(open.length), style: const TextStyle(fontSize: 13, color: t50)),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: s.todoOpen ? .5 : 0,
+                    duration: Motion.of(context, Motion.base),
+                    curve: Motion.ease,
+                    child: const Icon(Icons.expand_more, size: 16, color: t30),
+                  ),
+                ]),
+              ),
             ),
-            if (s.todoOpen) ...[
+            // 접기·펴기: 높이가 부드럽게 늘었다 줄어듦
+            AnimatedSize(
+              duration: Motion.of(context, Motion.slow),
+              curve: Motion.ease,
+              alignment: Alignment.topCenter,
+              child: !s.todoOpen
+                  ? const SizedBox(width: double.infinity)
+                  : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const SizedBox(height: 10),
               for (final t in [...open, ...done])
                 _item(
@@ -575,7 +676,7 @@ class _RightPanel extends StatelessWidget {
                   child: TextField(
                     controller: s.todoCtl,
                     style: const TextStyle(fontSize: 13, color: t100),
-                    decoration: underlineDecoration(pal.accent, hint: '할 일 추가 후 Enter'),
+                    decoration: underlineDecoration(pal.accent, hint: 'Add a task'),
                     onSubmitted: (v) {
                       if (v.trim().isEmpty) return;
                       st.addTodo(v.trim());
@@ -586,11 +687,12 @@ class _RightPanel extends StatelessWidget {
                 if (done.isNotEmpty)
                   TextButton(
                     style: textButton(),
-                    onPressed: () => s.toast('완료한 할 일 ${st.clearDoneUndated()}개를 지웠어요.'),
-                    child: const Text('완료 지우기'),
+                    onPressed: () => s.toast('Cleared ${st.clearDoneUndated()} done'),
+                    child: const Text('Clear done'),
                   ),
               ]),
-            ],
+            ]),
+            ),
           ]),
         ),
       ],

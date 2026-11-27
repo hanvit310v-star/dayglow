@@ -17,16 +17,16 @@ const windStrongKmh = 40; // 강풍 기준
 const busyEvents = 5, busyFreeMinutes = 180; // 바쁜 날: 일정 5개 이상 또는 빈 시간 3시간 미만
 
 const weatherLabel = {
-  'clear': '맑음',
-  'night': '맑은 밤',
-  'cloudy': '흐림',
-  'rain': '비',
-  'snow': '눈',
-  'fog': '안개',
-  'storm': '뇌우',
+  'clear': 'Clear',
+  'night': 'Clear night',
+  'cloudy': 'Cloudy',
+  'rain': 'Rain',
+  'snow': 'Snow',
+  'fog': 'Fog',
+  'storm': 'Storm',
 };
-const todLabel = {'dawn': '새벽', 'day': '낮', 'dusk': '노을', 'night': '밤'};
-const tempLabel = {'normal': '보통', 'heat': '폭염', 'cold': '한파'};
+const todLabel = {'dawn': 'Dawn', 'day': 'Day', 'dusk': 'Dusk', 'night': 'Night'};
+const tempLabel = {'normal': 'Mild', 'heat': 'Heat', 'cold': 'Cold'};
 
 /// 세계기상기구(WMO) 날씨 코드 → 테마
 String themeOf(int code, bool isDay) {
