@@ -346,8 +346,8 @@ class _LeftPane extends StatelessWidget {
     ]);
     const brand = Text.rich(TextSpan(children: [
       TextSpan(text: 'Day'),
-      TextSpan(text: 'glow', style: TextStyle(color: Color(0xFFA3BDB3))),
-    ]), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: t100, letterSpacing: .3));
+      TextSpan(text: 'glow'),
+    ]), style: TextStyle(fontFamily: 'DayglowSerif', fontSize: 18, fontWeight: FontWeight.w400, color: t100, letterSpacing: .2, height: 1.1));
 
     final top = wide
         ? Row(children: [brand, const SizedBox(width: 22), viewTabs, const Spacer(), nav, const SizedBox(width: 14), tools])
@@ -399,9 +399,47 @@ class _LeftPane extends StatelessWidget {
           child: RollingText(s.title, direction: s.navDir < 0 ? -1 : 1, style: const TextStyle(fontSize: 12, letterSpacing: 1.6, color: t50)),
         ),
         if (wide) Expanded(child: switcher) else switcher,
-        SizedBox(height: wide ? 30 : 24),
-        _Hero(state: s, pal: pal, compact: compact),
+        // 큰 날짜 영역은 월(M) 보기에서만 보임 — W·D로 가면 아래로 내려가며 사라지고, M으로 돌아오면 반대로 올라옴
+        _HeroReveal(
+          show: s.view == 'month',
+          gap: wide ? 30 : 24,
+          child: _Hero(state: s, pal: pal, compact: compact),
+        ),
       ]),
+    );
+  }
+}
+
+/// 보이기/숨기기: 숨길 때는 아래로 살짝 내려가며 흐려지고(자리도 부드럽게 접힘), 보일 때는 그 반대
+class _HeroReveal extends StatelessWidget {
+  final bool show;
+  final double gap;
+  final Widget child;
+  const _HeroReveal({required this.show, required this.gap, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: show ? 1 : 0),
+      duration: Motion.of(context, const Duration(milliseconds: 380)),
+      curve: Curves.easeInOutCubic,
+      builder: (context, t, _) {
+        if (t == 0) return const SizedBox.shrink();
+        return IgnorePointer(
+          ignoring: !show,
+          child: Align(
+            alignment: Alignment.topLeft,
+            heightFactor: t,
+            child: Opacity(
+              opacity: t,
+              child: Transform.translate(
+                offset: Offset(0, (1 - t) * 28), // 숨을수록 아래로
+                child: Padding(padding: EdgeInsets.only(top: gap), child: child),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

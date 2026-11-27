@@ -70,7 +70,12 @@ flutter:
   # 라이선스 전문: assets/fonts/OFL-Pretendard-LICENSE.txt
   assets:
     - assets/fonts/OFL-Pretendard-LICENSE.txt
+    - assets/fonts/OFL-PlayfairDisplay-LICENSE.txt
   fonts:
+    # 로고(Dayglow) 전용 에디토리얼 세리프 글꼴 (Playfair Display, SIL OFL 1.1)
+    - family: DayglowSerif
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay.ttf
     - family: DayglowSans
       fonts:
         - asset: assets/fonts/DayglowSans-ExtraLight.otf
