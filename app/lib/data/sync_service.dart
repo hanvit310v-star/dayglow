@@ -32,10 +32,10 @@ class SyncService extends ChangeNotifier {
 
   StreamSubscription<User?>? _authSub;
 
-  static Future<SyncService> create() async {
-    if (DefaultFirebaseOptions.currentPlatform.apiKey == DefaultFirebaseOptions.notConfiguredKey) {
-      return SyncService._(false);
-    }
+  /// [skipFirebase] 가 true 면 Firebase 를 켜지 않고 기기 안 저장으로만 시작해요 (자동 테스트용)
+  static Future<SyncService> create({bool skipFirebase = false}) async {
+    if (skipFirebase) return SyncService._(false);
+    // 설정이 없는 플랫폼(예: 아직 연결 안 한 iOS)은 currentPlatform 이 오류를 던지고, 아래 catch 가 기기 안 저장으로 돌려요
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       try {

@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "939977836161",
+    "project_id": "dayglow-4311f",
+    "storage_bucket": "dayglow-4311f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:939977836161:android:c0da3fbdc39a14fbf4af80",
+        "android_client_info": {
+          "package_name": "com.dayglow.dayglow"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "939977836161-8bcf4tek0o1m5jee9eh9l3ar71j9ee63.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCFWH3Qf-q9jIgdcpA68utV929Ei37tINg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "939977836161-8bcf4tek0o1m5jee9eh9l3ar71j9ee63.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "939977836161-gs19kia1f6n7cni1m6tgrquvaoipefku.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dayglow.dayglow"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

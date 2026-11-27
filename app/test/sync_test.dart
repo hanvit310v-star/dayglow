@@ -13,7 +13,7 @@ void main() {
 
   test('Firebase 연결 전에는 sync 가 꺼져 있고, 일정은 기기 안에 정상 저장된다', () async {
     SharedPreferences.setMockInitialValues({});
-    final sync = await SyncService.create();
+    final sync = await SyncService.create(skipFirebase: true);
     expect(sync.available, isFalse);
 
     final store = CalendarStore();
@@ -37,7 +37,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final store = CalendarStore();
     await store.load();
-    store.attachSync(await SyncService.create());
+    store.attachSync(await SyncService.create(skipFirebase: true));
     final pal = paletteOf('clear');
     await tester.pumpWidget(MaterialApp(
       home: Builder(
